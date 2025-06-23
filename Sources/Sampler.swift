@@ -173,6 +173,21 @@ struct SeededRandomNumberGenerator: RandomNumberGenerator {
         self.state = seed == 0 ? UInt64.random(in: 0...UInt64.max) : seed
     }
     
+    /// Generates the next random number using Linear Congruential Generator (LCG)
+    /// 
+    /// Uses the formula: next_state = (current_state * multiplier + increment) mod 2^64
+    /// The magic numbers are carefully chosen constants from the MMIX LCG by Donald Knuth:
+    /// - 6364136223846793005: Multiplier constant (a) - provides maximum period length
+    /// - 1442695040888963407: Increment constant (c) - ensures good statistical properties
+    /// 
+    /// These constants have been extensively tested and provide:
+    /// - Maximum period length (2^64)
+    /// - Good distribution properties
+    /// - No obvious patterns or correlations
+    /// - Fast computation (single multiplication + addition)
+    /// 
+    /// Note: This is NOT cryptographically secure, but suitable for ML sampling applications.
+    /// - Returns: Next 64-bit random number
     mutating func next() -> UInt64 {
         state = state &* 6364136223846793005 &+ 1442695040888963407
         return state
