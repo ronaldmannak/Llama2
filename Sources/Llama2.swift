@@ -21,7 +21,7 @@ enum Mode: String, CaseIterable, ExpressibleByArgument {
 
 final class Llama2Engine {
     private let transformer: Transformer
-    private let tokenizer: Tokenizer
+    private var tokenizer: Tokenizer
     private var sampler: Sampler
     
     init(transformer: Transformer, tokenizer: Tokenizer, sampler: Sampler) {
@@ -31,28 +31,149 @@ final class Llama2Engine {
     }
     
     func generate(prompt: String?, steps: Int) throws -> String {
-        return ""
-        let inputTokens = prompt.map { tokenizer.tokenize($0) } ?? []
-        var outputTokens: [Int] = []
+        let emptyPrompt = ""
+        let actualPrompt = prompt ?? emptyPrompt
         
-        for _ in 0..<steps {
-            let allTokens = inputTokens + outputTokens
-            let logits = transformer.forward(tokens: allTokens)
-            let nextToken = sampler.sample(logits: logits)
-            outputTokens.append(nextToken)
+        // Encode the prompt into tokens
+        let promptTokens = tokenizer.encode(text: actualPrompt, bos: true, eos: false)
+        
+        guard !promptTokens.isEmpty else {
+            throw Llama2Error.invalidParameter("Expected at least 1 prompt token")
         }
         
-        return tokenizer.detokenize(outputTokens)
+        // Start the main loop
+        var start: TimeInterval = 0 // Used to time our code, only initialized after first iteration
+        var next: Int // Will store the next token in the sequence
+        var token = promptTokens[0] // Kick off with the first token in the prompt
+        var pos = 0 // Position in the sequence
+        var output = ""
+        
+        while pos < steps {
+            // Forward the transformer to get logits for the next token
+            let logits = transformer.forward(token: token, pos: pos)
+            
+            // Advance the state machine
+            if pos < promptTokens.count - 1 {
+                // If we are still processing the input prompt, force the next prompt token
+                next = promptTokens[pos + 1]
+            } else {
+                // Otherwise sample the next token from the logits
+                next = sampler.sample(logits: logits)
+            }
+            pos += 1
+            
+            // Data-dependent terminating condition: the BOS (=1) token delimits sequences
+            if next == 1 { break }
+            
+            // Print the token as string, decode it with the Tokenizer object
+            let piece = tokenizer.decode(prevToken: token, token: next)
+            tokenizer.safePrint(piece)
+            output += piece
+            token = next
+            
+            // Init the timer here because the first iteration can be slower
+            if start == 0 { start = Date().timeIntervalSince1970 }
+        }
+        
+        print("\n")
+        
+        // Report achieved tok/s (pos-1 because the timer starts after first iteration)
+        if pos > 1 {
+            let end = Date().timeIntervalSince1970
+            let tokPerSec = Double(pos - 1) / (end - start)
+            fputs("achieved tok/s: \(tokPerSec)\n", stderr)
+        }
+        
+        return output
     }
     
     func chat(prompt: String?, systemPrompt: String?, steps: Int) throws -> String {
-        return ""
-//        let systemTokens = systemPrompt.map { tokenizer.tokenize($0) } ?? []
-//        let promptTokens = prompt.map { tokenizer.tokenize($0) } ?? []
-//        
-//        // TODO: Implement proper chat formatting
-//        let fullPrompt = [systemPrompt, prompt].compactMap { $0 }.joined(separator: "\n")
-//        return try generate(prompt: fullPrompt, steps: steps)
+        // Buffers for reading the system prompt and user prompt
+        var systemPromptBuffer = ""
+        var userPromptBuffer = ""
+        var renderedPrompt = ""
+        var promptTokens: [Int] = []
+        var userIdx = 0
+        
+        // Start the main loop
+        var userTurn = true // User starts
+        var next: Int = 0 // Will store the next token in the sequence
+        var token: Int = 0 // Stores the current token to feed into the transformer
+        var pos = 0 // Position in the sequence
+        var output = ""
+        
+        while pos < steps {
+            // When it is the user's turn to contribute tokens to the dialog...
+            if userTurn {
+                // Get the (optional) system prompt at position 0
+                if pos == 0 {
+                    // At position 0, the user can also contribute a system prompt
+                    if let cliSystemPrompt = systemPrompt {
+                        // System prompt was passed in, use it
+                        systemPromptBuffer = cliSystemPrompt
+                    } else {
+                        // System prompt was not passed in, attempt to get it from stdin
+                        print("Enter system prompt (optional): ", terminator: "")
+                        systemPromptBuffer = readLine() ?? ""
+                    }
+                }
+                
+                // Get the user prompt
+                if pos == 0, let cliUserPrompt = prompt {
+                    // User prompt for position 0 was passed in, use it
+                    userPromptBuffer = cliUserPrompt
+                } else {
+                    // Otherwise get user prompt from stdin
+                    print("User: ", terminator: "")
+                    userPromptBuffer = readLine() ?? ""
+                }
+                
+                // Render user/system prompts into the Llama 2 Chat schema
+                if pos == 0 && !systemPromptBuffer.isEmpty {
+                    let systemTemplate = "[INST] <<SYS>>\n\(systemPromptBuffer)\n<</SYS>>\n\n\(userPromptBuffer) [/INST]"
+                    renderedPrompt = systemTemplate
+                } else {
+                    let userTemplate = "[INST] \(userPromptBuffer) [/INST]"
+                    renderedPrompt = userTemplate
+                }
+                
+                // Encode the rendered prompt into tokens
+                promptTokens = tokenizer.encode(text: renderedPrompt, bos: true, eos: false)
+                userIdx = 0 // Reset the user index
+                userTurn = false
+                print("Assistant: ", terminator: "")
+            }
+            
+            // Determine the token to pass into the transformer next
+            if userIdx < promptTokens.count {
+                // If we are still processing the input prompt, force the next prompt token
+                token = promptTokens[userIdx]
+                userIdx += 1
+            } else {
+                // Otherwise use the next token sampled from previous turn
+                token = next
+            }
+            
+            // EOS (=2) token ends the Assistant turn
+            if token == 2 { userTurn = true }
+            
+            // Forward the transformer to get logits for the next token
+            let logits = transformer.forward(token: token, pos: pos)
+            next = sampler.sample(logits: logits)
+            pos += 1
+            
+            if userIdx >= promptTokens.count && next != 2 {
+                // The Assistant is responding, so print its output
+                let piece = tokenizer.decode(prevToken: token, token: next)
+                tokenizer.safePrint(piece)
+                output += piece
+            }
+            
+            if next == 2 { print("\n") }
+        }
+        
+        print("\n")
+        return output
     }
 }
 
