@@ -273,6 +273,66 @@ struct Llama2: ParsableCommand {
         let transformer = try Transformer(checkpointPath: checkpointPath)
         let sampler = Sampler(temperature: params.temperature, topp: params.topP, seed: params.seed)
         
+        // Sanity check 1: Verify vocabulary sizes match
+        let tokenizerVocabSize = tokenizer.vocabularySize
+        let modelVocabSize = Int(transformer.config.vocabSize)
+        
+        guard tokenizerVocabSize == modelVocabSize else {
+            throw Llama2Error.invalidParameter("Vocabulary size mismatch: tokenizer has \(tokenizerVocabSize) tokens, model expects \(modelVocabSize) tokens")
+        }
+        
+        // Sanity check 2: Verify token embedding table size is correct
+        let expectedEmbeddingSize = modelVocabSize * Int(transformer.config.dim)
+        let actualEmbeddingSize = transformer.weights.tokenEmbeddingTable.count
+        
+        guard actualEmbeddingSize == expectedEmbeddingSize else {
+            throw Llama2Error.invalidParameter("Token embedding table size mismatch: expected \(expectedEmbeddingSize), got \(actualEmbeddingSize)")
+        }
+        
+        // Sanity check 3: Verify model configuration is reasonable
+        guard transformer.config.dim > 0 else {
+            throw Llama2Error.invalidParameter("Invalid model dimension: \(transformer.config.dim)")
+        }
+        
+        guard transformer.config.numLayers > 0 else {
+            throw Llama2Error.invalidParameter("Invalid number of layers: \(transformer.config.numLayers)")
+        }
+        
+        guard transformer.config.seqLen > 0 else {
+            throw Llama2Error.invalidParameter("Invalid sequence length: \(transformer.config.seqLen)")
+        }
+        
+        // Sanity check 4: Test tokenizer with a simple token
+        #if DEBUG
+        do {
+            var testTokenizer = tokenizer
+            let testTokens = testTokenizer.encode(text: "test", bos: false, eos: false)
+            for token in testTokens {
+                guard token >= 0 && token < modelVocabSize else {
+                    throw Llama2Error.invalidParameter("Tokenizer produced invalid token ID: \(token) (vocab size: \(modelVocabSize))")
+                }
+            }
+        } catch {
+            throw Llama2Error.invalidParameter("Tokenizer test failed: \(error)")
+        }
+        
+        // Print configuration summary for debugging
+        fputs("Configuration:\n", stderr)
+        fputs("  Model vocab size: \(modelVocabSize)\n", stderr)
+        fputs("  Tokenizer vocab size: \(tokenizerVocabSize)\n", stderr)
+        fputs("  Model dimension: \(transformer.config.dim)\n", stderr)
+        fputs("  Number of layers: \(transformer.config.numLayers)\n", stderr)
+        fputs("  Sequence length: \(transformer.config.seqLen)\n", stderr)
+        fputs("  Temperature: \(params.temperature)\n", stderr)
+        fputs("  Top-p: \(params.topP)\n", stderr)
+        fputs("  Steps: \(params.steps)\n", stderr)
+        fputs("  Mode: \(mode)\n", stderr)
+        if let prompt = params.prompt {
+            fputs("  Prompt: \"\(prompt)\"\n", stderr)
+        }
+        fputs("\n", stderr)
+        #endif 
+        
         // Create engine
         let engine = Llama2Engine(
             transformer: transformer,
