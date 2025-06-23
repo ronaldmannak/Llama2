@@ -238,39 +238,6 @@ final class Llama2Engine {
     }
 }
 
-// MARK: - Factory Functions
-
-func buildTransformer(from checkpointPath: String) throws -> Transformer {
-    // TODO: Implement transformer building from checkpoint file
-    print("Building transformer from checkpoint: \(checkpointPath)")
-    
-    // Validate file exists
-    guard FileManager.default.fileExists(atPath: checkpointPath) else {
-        throw Llama2Error.fileNotFound(checkpointPath)
-    }
-    
-    return Transformer(config: Config(vocabSize: 32000, seqLen: 2048))
-}
-
-func buildTokenizer(from tokenizerPath: String, vocabSize: Int) throws -> Tokenizer {
-    // TODO: Implement tokenizer building from tokenizer file
-    print("Building tokenizer from: \(tokenizerPath) with vocab size: \(vocabSize)")
-    
-    // Validate file exists
-    guard FileManager.default.fileExists(atPath: tokenizerPath) else {
-        throw Llama2Error.fileNotFound(tokenizerPath)
-    }
-    
-    return Tokenizer()
-}
-
-func buildSampler(vocabSize: Int, temperature: Float, topp: Float, seed: UInt64) -> Sampler {
-    // TODO: Implement sampler building
-    print("Building sampler with vocab size: \(vocabSize), temperature: \(temperature), topp: \(topp), seed: \(seed)")
-    
-    return Sampler(temperature: temperature, topp: topp, seed: seed)
-}
-
 // MARK: - Parameter Validation
 
 struct GenerationParameters {
@@ -362,15 +329,18 @@ struct Llama2: ParsableCommand {
             systemPrompt: systemPrompt
         )
         
-        // Build components
-        let transformer = try buildTransformer(from: checkpointPath)
-        let tokenizer = try buildTokenizer(from: tokenizerPath, vocabSize: transformer.config.vocabSize)
-        let sampler = buildSampler(
-            vocabSize: transformer.config.vocabSize,
-            temperature: params.temperature,
-            topp: params.topP,
-            seed: params.seed
-        )
+        // Validate files exist
+        guard FileManager.default.fileExists(atPath: checkpointPath) else {
+            throw Llama2Error.fileNotFound(checkpointPath)
+        }
+        guard FileManager.default.fileExists(atPath: tokenizerPath) else {
+            throw Llama2Error.fileNotFound(tokenizerPath)
+        }
+        
+        // Create components directly
+        let transformer = Transformer(config: Config(vocabSize: 32000, seqLen: 2048))
+        let tokenizer = Tokenizer()
+        let sampler = Sampler(temperature: params.temperature, topp: params.topP, seed: params.seed)
         
         // Create engine
         let engine = Llama2Engine(
