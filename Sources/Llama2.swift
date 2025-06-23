@@ -31,26 +31,28 @@ final class Llama2Engine {
     }
     
     func generate(prompt: String?, steps: Int) throws -> String {
-        let inputTokens = prompt.map { tokenizer.tokenize($0) } ?? []
-        var outputTokens: [Int] = []
-        
-        for _ in 0..<steps {
-            let allTokens = inputTokens + outputTokens
-            let logits = transformer.forward(tokens: allTokens)
-            let nextToken = sampler.sample(logits: logits)
-            outputTokens.append(nextToken)
-        }
-        
-        return tokenizer.detokenize(outputTokens)
+        return ""
+//        let inputTokens = prompt.map { tokenizer.tokenize($0) } ?? []
+//        var outputTokens: [Int] = []
+//        
+//        for _ in 0..<steps {
+//            let allTokens = inputTokens + outputTokens
+//            let logits = transformer.forward(tokens: allTokens)
+//            let nextToken = sampler.sample(logits: logits)
+//            outputTokens.append(nextToken)
+//        }
+//        
+//        return tokenizer.detokenize(outputTokens)
     }
     
     func chat(prompt: String?, systemPrompt: String?, steps: Int) throws -> String {
-        let systemTokens = systemPrompt.map { tokenizer.tokenize($0) } ?? []
-        let promptTokens = prompt.map { tokenizer.tokenize($0) } ?? []
-        
-        // TODO: Implement proper chat formatting
-        let fullPrompt = [systemPrompt, prompt].compactMap { $0 }.joined(separator: "\n")
-        return try generate(prompt: fullPrompt, steps: steps)
+        return ""
+//        let systemTokens = systemPrompt.map { tokenizer.tokenize($0) } ?? []
+//        let promptTokens = prompt.map { tokenizer.tokenize($0) } ?? []
+//        
+//        // TODO: Implement proper chat formatting
+//        let fullPrompt = [systemPrompt, prompt].compactMap { $0 }.joined(separator: "\n")
+//        return try generate(prompt: fullPrompt, steps: steps)
     }
 }
 
@@ -157,8 +159,8 @@ struct Llama2: ParsableCommand {
         let (config, weights) = try readCheckpoint(from: checkpointPath)
         
         // Create components with actual model data
+        let tokenizer = try Tokenizer(tokenizerPath: tokenizerPath)
         let transformer = Transformer(config: config, weights: weights)
-        let tokenizer = Tokenizer()
         let sampler = Sampler(temperature: params.temperature, topp: params.topP, seed: params.seed)
         
         // Create engine

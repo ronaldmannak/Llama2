@@ -1,5 +1,5 @@
 //
-//  File.swift
+//  Tokenizer.swift
 //  Llama2
 //
 //  Created by Ronald Mannak on 6/22/25.
@@ -7,239 +7,420 @@
 
 import Foundation
 
-struct Tokenizer {
-    private let vocab: [String: Int]
-    private let merges: [String: String]
+/// Represents a token with its string representation and ID
+struct TokenIndex {
+    let str: String
+    let id: Int
+}
+
+/// Added token information from the tokenizer JSON
+struct AddedToken: Codable {
+    let id: Int
+    let content: String
+    let singleWord: Bool
+    let lstrip: Bool
+    let rstrip: Bool
+    let normalized: Bool
+    let special: Bool
     
-    init(vocab: [String: Int] = [:], merges: [String: String] = [:]) {
-        self.vocab = vocab
-        self.merges = merges
-    }
-    
-    func tokenize(_ text: String) -> [Int] {
-        // TODO: Implement actual tokenization
-        return text.components(separatedBy: " ").compactMap { vocab[$0] }
-    }
-    
-    func detokenize(_ tokens: [Int]) -> String {
-        // TODO: Implement actual detokenization
-        return tokens.compactMap { token in
-            vocab.first { $0.value == token }?.key
-        }.joined(separator: " ")
+    enum CodingKeys: String, CodingKey {
+        case id, content, normalized, special
+        case singleWord = "single_word"
+        case lstrip, rstrip
     }
 }
 
+/// Normalizer configuration
+struct Normalizer: Codable {
+    let type: String
+    let normalizers: [NormalizerConfig]?
+    let prepend: String?
+    let pattern: PatternConfig?
+    let content: String?
+}
 
+struct NormalizerConfig: Codable {
+    let type: String
+    let prepend: String?
+    let pattern: PatternConfig?
+    let content: String?
+}
 
-/*
- Port this C code to this Swift project. Create stub functions for the tokenizer, sampler, and transformer and other custom objects or functions. Make sure the code conforms to modern Swift 6.1 standards and follows Swift-idiomatic patterns including automatic memory management, value types where appropriate, and Swift's built-in data structures like Data for file handling. Avoid manual memory management and low-level system calls in favor of Swift's safe, automatic memory management.
- 
- // ----------------------------------------------------------------------------
- // The Byte Pair Encoding (BPE) Tokenizer that translates strings <-> tokens
+struct PatternConfig: Codable {
+    let string: String?
+}
 
- typedef struct {
-     char *str;
-     int id;
- } TokenIndex;
+/// Post processor configuration
+struct PostProcessor: Codable {
+    let type: String
+    let single: [ProcessingStep]?
+    let pair: [ProcessingStep]?
+    let specialTokens: [String: SpecialTokenInfo]?
+    
+    enum CodingKeys: String, CodingKey {
+        case type, single, pair
+        case specialTokens = "special_tokens"
+    }
+}
 
- typedef struct {
-     char** vocab;
-     float* vocab_scores;
-     TokenIndex *sorted_vocab;
-     int vocab_size;
-     unsigned int max_token_length;
-     unsigned char byte_pieces[512]; // stores all single-byte strings
- } Tokenizer;
+struct ProcessingStep: Codable {
+    let specialToken: SpecialTokenStep?
+    let sequence: SequenceStep?
+    
+    enum CodingKeys: String, CodingKey {
+        case specialToken = "SpecialToken"
+        case sequence = "Sequence"
+    }
+}
 
- int compare_tokens(const void *a, const void *b) {
-     return strcmp(((TokenIndex*)a)->str, ((TokenIndex*)b)->str);
- }
+struct SpecialTokenStep: Codable {
+    let id: String
+    let typeId: Int
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case typeId = "type_id"
+    }
+}
 
- void build_tokenizer(Tokenizer* t, char* tokenizer_path, int vocab_size) {
-     // i should have written the vocab_size into the tokenizer file... sigh
-     t->vocab_size = vocab_size;
-     // malloc space to hold the scores and the strings
-     t->vocab = (char**)malloc(vocab_size * sizeof(char*));
-     t->vocab_scores = (float*)malloc(vocab_size * sizeof(float));
-     t->sorted_vocab = NULL; // initialized lazily
-     for (int i = 0; i < 256; i++) {
-         t->byte_pieces[i * 2] = (unsigned char)i;
-         t->byte_pieces[i * 2 + 1] = '\0';
-     }
-     // read in the file
-     FILE *file = fopen(tokenizer_path, "rb");
-     if (!file) { fprintf(stderr, "couldn't load %s\n", tokenizer_path); exit(EXIT_FAILURE); }
-     if (fread(&t->max_token_length, sizeof(int), 1, file) != 1) { fprintf(stderr, "failed read\n"); exit(EXIT_FAILURE); }
-     int len;
-     for (int i = 0; i < vocab_size; i++) {
-         if (fread(t->vocab_scores + i, sizeof(float), 1, file) != 1) { fprintf(stderr, "failed read\n"); exit(EXIT_FAILURE);}
-         if (fread(&len, sizeof(int), 1, file) != 1) { fprintf(stderr, "failed read\n"); exit(EXIT_FAILURE); }
-         t->vocab[i] = (char *)malloc(len + 1);
-         if (fread(t->vocab[i], len, 1, file) != 1) { fprintf(stderr, "failed read\n"); exit(EXIT_FAILURE); }
-         t->vocab[i][len] = '\0'; // add the string terminating token
-     }
-     fclose(file);
- }
+struct SequenceStep: Codable {
+    let id: String
+    let typeId: Int
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case typeId = "type_id"
+    }
+}
 
- void free_tokenizer(Tokenizer* t) {
-     for (int i = 0; i < t->vocab_size; i++) { free(t->vocab[i]); }
-     free(t->vocab);
-     free(t->vocab_scores);
-     free(t->sorted_vocab);
- }
+struct SpecialTokenInfo: Codable {
+    let id: String
+    let ids: [Int]
+    let tokens: [String]
+}
 
- char* decode(Tokenizer* t, int prev_token, int token) {
-     char *piece = t->vocab[token];
-     // following BOS (1) token, sentencepiece decoder strips any leading whitespace (see PR #89)
-     if (prev_token == 1 && piece[0] == ' ') { piece++; }
-     // careful, some tokens designate raw bytes, and look like e.g. '<0x01>'
-     // parse this and convert and return the actual byte
-     unsigned char byte_val;
-     if (sscanf(piece, "<0x%02hhX>", &byte_val) == 1) {
-         piece = (char*)t->byte_pieces + byte_val * 2;
-     }
-     return piece;
- }
+/// Decoder configuration
+struct Decoder: Codable {
+    let type: String
+    let decoders: [DecoderConfig]?
+    let pattern: PatternConfig?
+    let content: String?
+    let start: Int?
+    let stop: Int?
+}
 
- void safe_printf(char *piece) {
-     // piece might be a raw byte token, and we only want to print printable chars or whitespace
-     // because some of the other bytes can be various control codes, backspace, etc.
-     if (piece == NULL) { return; }
-     if (piece[0] == '\0') { return; }
-     if (piece[1] == '\0') {
-         unsigned char byte_val = piece[0];
-         if (!(isprint(byte_val) || isspace(byte_val))) {
-             return; // bad byte, don't print it
-         }
-     }
-     printf("%s", piece);
- }
+struct DecoderConfig: Codable {
+    let type: String
+    let pattern: PatternConfig?
+    let content: String?
+    let start: Int?
+    let stop: Int?
+}
 
- int str_lookup(char *str, TokenIndex *sorted_vocab, int vocab_size) {
-     // efficiently find the perfect match for str in vocab, return its index or -1 if not found
-     TokenIndex tok = { .str = str }; // acts as the key to search for
-     TokenIndex *res = bsearch(&tok, sorted_vocab, vocab_size, sizeof(TokenIndex), compare_tokens);
-     return res != NULL ? res->id : -1;
- }
+/// BPE model configuration
+struct BPEModel: Codable {
+    let type: String
+    let dropout: String?
+    let unkToken: String
+    let continuingSubwordPrefix: String?
+    let endOfWordSuffix: String?
+    let fuseUnk: Bool
+    let byteFallback: Bool
+    let vocab: [String: Int]
+    let merges: [String]
+    
+    enum CodingKeys: String, CodingKey {
+        case type, dropout, vocab, merges
+        case unkToken = "unk_token"
+        case continuingSubwordPrefix = "continuing_subword_prefix"
+        case endOfWordSuffix = "end_of_word_suffix"
+        case fuseUnk = "fuse_unk"
+        case byteFallback = "byte_fallback"
+    }
+}
 
- void encode(Tokenizer* t, char *text, int8_t bos, int8_t eos, int *tokens, int *n_tokens) {
-     // encode the string text (input) into an upper-bound preallocated tokens[] array
-     // bos != 0 means prepend the BOS token (=1), eos != 0 means append the EOS token (=2)
-     if (text == NULL) { fprintf(stderr, "cannot encode NULL text\n"); exit(EXIT_FAILURE); }
+/// Complete tokenizer configuration
+struct TokenizerConfig: Codable {
+    let version: String
+    let truncation: String?
+    let padding: String?
+    let addedTokens: [AddedToken]
+    let normalizer: Normalizer?
+    let preTokenizer: String?
+    let postProcessor: PostProcessor?
+    let decoder: Decoder?
+    let model: BPEModel
+    
+    enum CodingKeys: String, CodingKey {
+        case version, truncation, padding, normalizer, decoder, model
+        case addedTokens = "added_tokens"
+        case preTokenizer = "pre_tokenizer"
+        case postProcessor = "post_processor"
+    }
+}
 
-     if (t->sorted_vocab == NULL) {
-         // lazily malloc and sort the vocabulary
-         t->sorted_vocab = malloc(t->vocab_size * sizeof(TokenIndex));
-         for (int i = 0; i < t->vocab_size; i++) {
-             t->sorted_vocab[i].str = t->vocab[i];
-             t->sorted_vocab[i].id = i;
-         }
-         qsort(t->sorted_vocab, t->vocab_size, sizeof(TokenIndex), compare_tokens);
-     }
+/// Byte Pair Encoding (BPE) Tokenizer for converting between strings and tokens.
+/// Unlike Llama2.c, which leverages a binary file format for its tokenizer,
+/// this implementation uses Hugging Face's `tokenizer.json` for educational purposes.
+struct Tokenizer {
+    private let config: TokenizerConfig
+    private let vocab: [String: Int]
+    private let reverseVocab: [Int: String]
+    private let merges: [String]
+    private var sortedVocab: [TokenIndex]?
+    private let bytePieces: [String]
+    
+    /// Initialize tokenizer from a JSON file path
+    init(tokenizerPath: String) throws {
+        // Read and decode the JSON file
+        let data = try Data(contentsOf: URL(fileURLWithPath: tokenizerPath))
+        self.config = try JSONDecoder().decode(TokenizerConfig.self, from: data)
+        
+        // Initialize vocabulary
+        self.vocab = config.model.vocab
+        self.merges = config.model.merges
+        
+        // Create reverse vocabulary for efficient lookup
+        var reverseVocab: [Int: String] = [:]
+        for (token, id) in vocab {
+            reverseVocab[id] = token
+        }
+        self.reverseVocab = reverseVocab
+        
+        // Initialize byte pieces for single-byte strings
+        var bytePieces: [String] = []
+        for i in 0..<256 {
+            if let scalar = UnicodeScalar(i) {
+                bytePieces.append(String(scalar))
+            } else {
+                bytePieces.append("")
+            }
+        }
+        self.bytePieces = bytePieces
+    }
+    
+    /// Decode a token to its string representation
+    func decode(prevToken: Int, token: Int) -> String {
+        guard let piece = reverseVocab[token] else {
+            return config.model.unkToken
+        }
+        
+        // Following BOS (1) token, sentencepiece decoder strips any leading whitespace
+        if prevToken == 1 && piece.hasPrefix(" ") {
+            return String(piece.dropFirst())
+        }
+        
+        // Handle raw byte tokens that look like '<0x01>'
+        if piece.hasPrefix("<0x") && piece.hasSuffix(">") {
+            let hexString = String(piece.dropFirst(3).dropLast(1))
+            if let byteValue = UInt8(hexString, radix: 16) {
+                return bytePieces[Int(byteValue)]
+            }
+        }
+        
+        return piece
+    }
+    
+    /// Safely print a piece, handling raw byte tokens
+    func safePrint(_ piece: String) {
+        guard !piece.isEmpty else { return }
+        
+        if piece.count == 1 {
+            let byteValue = piece.utf8.first ?? 0
+            // Only print printable characters or whitespace
+            if !(byteValue >= 32 && byteValue <= 126) && byteValue != 9 && byteValue != 10 && byteValue != 13 {
+                return // Bad byte, don't print it
+            }
+        }
+        
+        print(piece, terminator: "")
+    }
+    
+    /// Efficiently find the perfect match for str in vocab, return its index or -1 if not found
+    private func strLookup(_ str: String, sortedVocab: [TokenIndex]) -> Int {
+        let token = TokenIndex(str: str, id: -1)
+        
+        // Binary search for the token
+        var left = 0
+        var right = sortedVocab.count - 1
+        
+        while left <= right {
+            let mid = (left + right) / 2
+            let comparison = str.compare(sortedVocab[mid].str)
+            
+            if comparison == .orderedSame {
+                return sortedVocab[mid].id
+            } else if comparison == .orderedAscending {
+                right = mid - 1
+            } else {
+                left = mid + 1
+            }
+        }
+        
+        return -1
+    }
+    
+    /// Encode a string into tokens using BPE
+    mutating func encode(text: String, bos: Bool = false, eos: Bool = false) -> [Int] {
+        guard !text.isEmpty else {
+            return []
+        }
+        
+        // Lazy initialization of sorted vocabulary
+        if sortedVocab == nil {
+            sortedVocab = vocab.map { (token, id) in
+                TokenIndex(str: token, id: id)
+            }.sorted { $0.str < $1.str }
+        }
+        
+        guard let sortedVocab = sortedVocab else { return [] }
+        
+        var tokens: [Int] = []
+        
+        // Add optional BOS token
+        if bos {
+            if let bosId = vocab["<s>"] {
+                tokens.append(bosId)
+            }
+        }
+        
+        // Apply normalizer if present (simplified - just prepend space if needed)
+        var normalizedText = text
+        if config.normalizer?.type == "Sequence" {
+            // Simple implementation: prepend space if text doesn't start with space
+            if !normalizedText.hasPrefix(" ") && !normalizedText.hasPrefix("▁") {
+                normalizedText = " " + normalizedText
+            }
+        }
+        
+        // Initial tokenization: split into characters/subwords
+        var wordTokens: [String] = []
+        var currentToken = ""
+        
+        for char in normalizedText {
+            let charStr = String(char)
+            if char == " " || char == "▁" {
+                if !currentToken.isEmpty {
+                    wordTokens.append(currentToken)
+                    currentToken = ""
+                }
+            } else {
+                currentToken += charStr
+            }
+        }
+        if !currentToken.isEmpty {
+            wordTokens.append(currentToken)
+        }
+        
+        // Tokenize each word using BPE
+        for word in wordTokens {
+            var wordTokens = tokenizeWord(word, sortedVocab: sortedVocab)
+            tokens.append(contentsOf: wordTokens)
+        }
+        
+        // Add optional EOS token
+        if eos {
+            if let eosId = vocab["</s>"] {
+                tokens.append(eosId)
+            }
+        }
+        
+        return tokens
+    }
+    
+    /// Tokenize a single word using BPE merges
+    private func tokenizeWord(_ word: String, sortedVocab: [TokenIndex]) -> [Int] {
+        var tokens: [String] = []
+        
+        // Start with individual characters
+        for char in word {
+            tokens.append(String(char))
+        }
+        
+        // Apply BPE merges
+        var changed = true
+        while changed {
+            changed = false
+            
+            for merge in merges {
+                let parts = merge.components(separatedBy: " ")
+                guard parts.count == 2 else { continue }
+                
+                let first = parts[0]
+                let second = parts[1]
+                
+                for i in 0..<(tokens.count - 1) {
+                    if tokens[i] == first && tokens[i + 1] == second {
+                        let merged = first + second
+                        if vocab[merged] != nil {
+                            tokens[i] = merged
+                            tokens.remove(at: i + 1)
+                            changed = true
+                            break
+                        }
+                    }
+                }
+                if changed { break }
+            }
+        }
+        
+        // Convert tokens to IDs
+        return tokens.compactMap { vocab[$0] }
+    }
+    
+    /// Tokenize text into tokens
+    mutating func tokenize(_ text: String) -> [Int] {
+        return encode(text: text, bos: true, eos: true)
+    }
+    
+    /// Detokenize tokens back to text
+    func detokenize(_ tokens: [Int]) -> String {
+        var result = ""
+        var prevToken = 0
+        
+        for token in tokens {
+            let piece = decode(prevToken: prevToken, token: token)
+            result += piece
+            prevToken = token
+        }
+        
+        // Apply decoder if present (simplified)
+        if config.decoder?.type == "Sequence" {
+            // Simple implementation: replace ▁ with space and strip leading space
+            result = result.replacingOccurrences(of: "▁", with: " ")
+            if result.hasPrefix(" ") {
+                result = String(result.dropFirst())
+            }
+        }
+        
+        return result
+    }
+    
+    /// Get vocabulary size
+    var vocabularySize: Int {
+        return vocab.count
+    }
+    
+    /// Get unknown token ID
+    var unknownTokenId: Int {
+        return vocab[config.model.unkToken] ?? 0
+    }
+    
+    /// Get BOS token ID
+    var bosTokenId: Int {
+        return vocab["<s>"] ?? 1
+    }
+    
+    /// Get EOS token ID
+    var eosTokenId: Int {
+        return vocab["</s>"] ?? 2
+    }
+}
 
-     // create a temporary buffer that will store merge candidates of always two consecutive tokens
-     // *2 for concat, +1 for null terminator +2 for UTF8 (in case max_token_length is 1)
-     char* str_buffer = malloc((t->max_token_length*2 +1 +2) * sizeof(char));
-     size_t str_len = 0;
-
-     // start at 0 tokens
-     *n_tokens = 0;
-
-     // add optional BOS (=1) token, if desired
-     if (bos) tokens[(*n_tokens)++] = 1;
-
-     // add_dummy_prefix is true by default
-     // so prepend a dummy prefix token to the input string, but only if text != ""
-     // TODO: pretty sure this isn't correct in the general case but I don't have the
-     // energy to read more of the sentencepiece code to figure out what it's doing
-     if (text[0] != '\0') {
-         int dummy_prefix = str_lookup(" ", t->sorted_vocab, t->vocab_size);
-         tokens[(*n_tokens)++] = dummy_prefix;
-     }
-
-     // Okay UTF-8 time. This will get messy. Here is the reference from Wikipedia:
-     // Code point ↔ UTF-8 conversion
-     // First code point    Last code point    Byte 1    Byte 2    Byte 3    Byte 4
-     // U+0000    U+007F        0xxxxxxx
-     // U+0080    U+07FF        110xxxxx    10xxxxxx
-     // U+0800    U+FFFF        1110xxxx    10xxxxxx    10xxxxxx
-     // U+10000    U+10FFFF    11110xxx    10xxxxxx    10xxxxxx    10xxxxxx
-
-     // process the raw (UTF-8) byte sequence of the input string
-     for (char *c = text; *c != '\0'; c++) {
-
-         // reset buffer if the current byte is ASCII or a leading byte
-         // 0xC0 is 11000000, so (*c & 0xC0) keeps the first 2 bits and zeros the rest
-         // 0x80 is 10000000
-         // in UTF-8, all continuation bytes start with "10" in first two bits
-         // so in English this is: "if this byte is not a continuation byte"
-         if ((*c & 0xC0) != 0x80) {
-             // this byte must be either a leading byte (11...) or an ASCII char (0x...)
-             // => reset our location, as we're starting a new UTF-8 codepoint
-             str_len = 0;
-         }
-
-         // append the current byte to the buffer
-         str_buffer[str_len++] = *c; // ++ is post-increment, incremented after this line
-         str_buffer[str_len] = '\0';
-
-         // while the next character is a continuation byte, continue appending
-         // but if there are too many of them, just stop to avoid overruning str_buffer size.
-         if ((*(c+1) & 0xC0) == 0x80 && str_len < 4) {
-             continue;
-         }
-
-         // ok c+1 is not a continuation byte, so we've read in a full codepoint
-         int id = str_lookup(str_buffer, t->sorted_vocab, t->vocab_size);
-
-         if (id != -1) {
-             // we found this codepoint in vocab, add it as a token
-             tokens[(*n_tokens)++] = id;
-         } else {
-             // byte_fallback encoding: just encode each byte as a token
-             // +3 is here because the first 3 vocab elements are <unk>, <s>, </s>
-             // so the individual bytes only start at index 3
-             for (int i=0; i < str_len; i++) {
-                 tokens[(*n_tokens)++] = (unsigned char)str_buffer[i] + 3;
-             }
-         }
-         str_len = 0; // protect against a sequence of stray UTF8 continuation bytes
-     }
-
-     // merge the best consecutive pair each iteration, according the scores in vocab_scores
-     while (1) {
-         float best_score = -1e10;
-         int best_id = -1;
-         int best_idx = -1;
-
-         for (int i=0; i < (*n_tokens-1); i++) {
-             // check if we can merge the pair (tokens[i], tokens[i+1])
-             sprintf(str_buffer, "%s%s", t->vocab[tokens[i]], t->vocab[tokens[i+1]]);
-             int id = str_lookup(str_buffer, t->sorted_vocab, t->vocab_size);
-             if (id != -1 && t->vocab_scores[id] > best_score) {
-                 // this merge pair exists in vocab! record its score and position
-                 best_score = t->vocab_scores[id];
-                 best_id = id;
-                 best_idx = i;
-             }
-         }
-
-         if (best_idx == -1) {
-             break; // we couldn't find any more pairs to merge, so we're done
-         }
-
-         // merge the consecutive pair (best_idx, best_idx+1) into new token best_id
-         tokens[best_idx] = best_id;
-         // delete token at position best_idx+1, shift the entire sequence back 1
-         for (int i = best_idx+1; i < (*n_tokens-1); i++) {
-             tokens[i] = tokens[i+1];
-         }
-         (*n_tokens)--; // token length decreased
-     }
-
-     // add optional EOS (=2) token, if desired
-     if (eos) tokens[(*n_tokens)++] = 2;
-
-     free(str_buffer);
- }
- */
+/// Errors that can occur during tokenizer operations
+enum TokenizerError: Error {
+    case invalidFileFormat(String)
+    case fileNotFound
+    case decodingError
+    case jsonDecodingError(Error)
+}
