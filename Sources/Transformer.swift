@@ -51,43 +51,14 @@ struct TransformerWeights {
     let rmsFinalWeight: [Float] // (dim,)
     // (optional) classifier weights for the logits, on the last layer
     let wcls: [Float]? // (vocab_size, dim) or nil if shared weights
-    
-    init(
-        tokenEmbeddingTable: [Float] = [],
-        rmsAttWeight: [Float] = [],
-        rmsFfnWeight: [Float] = [],
-        wq: [Float] = [],
-        wk: [Float] = [],
-        wv: [Float] = [],
-        wo: [Float] = [],
-        w1: [Float] = [],
-        w2: [Float] = [],
-        w3: [Float] = [],
-        rmsFinalWeight: [Float] = [],
-        wcls: [Float]? = nil
-    ) {
-        self.tokenEmbeddingTable = tokenEmbeddingTable
-        self.rmsAttWeight = rmsAttWeight
-        self.rmsFfnWeight = rmsFfnWeight
-        self.wq = wq
-        self.wk = wk
-        self.wv = wv
-        self.wo = wo
-        self.w1 = w1
-        self.w2 = w2
-        self.w3 = w3
-        self.rmsFinalWeight = rmsFinalWeight
-        self.wcls = wcls
-    }
 }
 
 // MARK: - Weight Mapping and Checkpoint Reading
 
 extension TransformerWeights {
     /// Maps binary data to weight arrays, equivalent to C's memory_map_weights
-    static func mapFromData(_ data: Data, config: Config, sharedWeights: Bool) -> TransformerWeights {
+    static func mapFromData(_ data: Data, config: Config, sharedWeights: Bool) throws -> TransformerWeights {
         let headSize = config.dim / config.numHeads
-        let kvDim = (config.dim * config.numKvHeads) / config.numHeads
         
         // Convert Data to [Float] for easier manipulation
         let floatCount = data.count / MemoryLayout<Float>.size
@@ -97,42 +68,28 @@ extension TransformerWeights {
         
         var ptr = 0
         
-        // Skip the config header (already read)
-        ptr += MemoryLayout<Config>.size / MemoryLayout<Float>.size
+        // Helper function to safely extract array slice
+        func extractArray(_ count: Int) throws -> [Float] {
+            guard ptr + count <= floats.count else {
+                throw Llama2Error.invalidParameter("Insufficient data for weight matrix")
+            }
+            let result = Array(floats[ptr..<(ptr + count)])
+            ptr += count
+            return result
+        }
         
         // Map weights in the same order as C code
-        let tokenEmbeddingTable = Array(floats[ptr..<(ptr + config.vocabSize * config.dim)])
-        ptr += config.vocabSize * config.dim
-        
-        let rmsAttWeight = Array(floats[ptr..<(ptr + config.numLayers * config.dim)])
-        ptr += config.numLayers * config.dim
-        
-        let wq = Array(floats[ptr..<(ptr + config.numLayers * config.dim * (config.numHeads * headSize))])
-        ptr += config.numLayers * config.dim * (config.numHeads * headSize)
-        
-        let wk = Array(floats[ptr..<(ptr + config.numLayers * config.dim * (config.numKvHeads * headSize))])
-        ptr += config.numLayers * config.dim * (config.numKvHeads * headSize)
-        
-        let wv = Array(floats[ptr..<(ptr + config.numLayers * config.dim * (config.numKvHeads * headSize))])
-        ptr += config.numLayers * config.dim * (config.numKvHeads * headSize)
-        
-        let wo = Array(floats[ptr..<(ptr + config.numLayers * (config.numHeads * headSize) * config.dim)])
-        ptr += config.numLayers * (config.numHeads * headSize) * config.dim
-        
-        let rmsFfnWeight = Array(floats[ptr..<(ptr + config.numLayers * config.dim)])
-        ptr += config.numLayers * config.dim
-        
-        let w1 = Array(floats[ptr..<(ptr + config.numLayers * config.dim * config.hiddenDim)])
-        ptr += config.numLayers * config.dim * config.hiddenDim
-        
-        let w2 = Array(floats[ptr..<(ptr + config.numLayers * config.hiddenDim * config.dim)])
-        ptr += config.numLayers * config.hiddenDim * config.dim
-        
-        let w3 = Array(floats[ptr..<(ptr + config.numLayers * config.dim * config.hiddenDim)])
-        ptr += config.numLayers * config.dim * config.hiddenDim
-        
-        let rmsFinalWeight = Array(floats[ptr..<(ptr + config.dim)])
-        ptr += config.dim
+        let tokenEmbeddingTable = try extractArray(config.vocabSize * config.dim)
+        let rmsAttWeight = try extractArray(config.numLayers * config.dim)
+        let wq = try extractArray(config.numLayers * config.dim * (config.numHeads * headSize))
+        let wk = try extractArray(config.numLayers * config.dim * (config.numKvHeads * headSize))
+        let wv = try extractArray(config.numLayers * config.dim * (config.numKvHeads * headSize))
+        let wo = try extractArray(config.numLayers * (config.numHeads * headSize) * config.dim)
+        let rmsFfnWeight = try extractArray(config.numLayers * config.dim)
+        let w1 = try extractArray(config.numLayers * config.dim * config.hiddenDim)
+        let w2 = try extractArray(config.numLayers * config.hiddenDim * config.dim)
+        let w3 = try extractArray(config.numLayers * config.dim * config.hiddenDim)
+        let rmsFinalWeight = try extractArray(config.dim)
         
         // Skip RoPE frequency tables (freq_cis_real and freq_cis_imag)
         ptr += config.seqLen * headSize / 2 // freq_cis_real
@@ -143,7 +100,7 @@ extension TransformerWeights {
         if sharedWeights {
             wcls = nil // Use token embedding table for shared weights
         } else {
-            wcls = Array(floats[ptr..<(ptr + config.vocabSize * config.dim)])
+            wcls = try extractArray(config.vocabSize * config.dim)
         }
         
         return TransformerWeights(
@@ -256,8 +213,11 @@ class Transformer {
             seqLen: config.seqLen
         )
         
-        // Map the weights from the remaining data
-        let weights = TransformerWeights.mapFromData(data, config: correctedConfig, sharedWeights: sharedWeights)
+        // Get the weight data (everything after the config)
+        let weightData = data.dropFirst(configSize)
+        
+        // Map the weights from the weight data
+        let weights = try TransformerWeights.mapFromData(weightData, config: correctedConfig, sharedWeights: sharedWeights)
         
         return (correctedConfig, weights)
     }
