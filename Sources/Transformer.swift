@@ -81,6 +81,88 @@ struct TransformerWeights {
     }
 }
 
+// MARK: - Weight Mapping and Checkpoint Reading
+
+extension TransformerWeights {
+    /// Maps binary data to weight arrays, equivalent to C's memory_map_weights
+    static func mapFromData(_ data: Data, config: Config, sharedWeights: Bool) -> TransformerWeights {
+        let headSize = config.dim / config.numHeads
+        let kvDim = (config.dim * config.numKvHeads) / config.numHeads
+        
+        // Convert Data to [Float] for easier manipulation
+        let floatCount = data.count / MemoryLayout<Float>.size
+        let floats = data.withUnsafeBytes { bytes in
+            Array(bytes.bindMemory(to: Float.self).prefix(floatCount))
+        }
+        
+        var ptr = 0
+        
+        // Skip the config header (already read)
+        ptr += MemoryLayout<Config>.size / MemoryLayout<Float>.size
+        
+        // Map weights in the same order as C code
+        let tokenEmbeddingTable = Array(floats[ptr..<(ptr + config.vocabSize * config.dim)])
+        ptr += config.vocabSize * config.dim
+        
+        let rmsAttWeight = Array(floats[ptr..<(ptr + config.numLayers * config.dim)])
+        ptr += config.numLayers * config.dim
+        
+        let wq = Array(floats[ptr..<(ptr + config.numLayers * config.dim * (config.numHeads * headSize))])
+        ptr += config.numLayers * config.dim * (config.numHeads * headSize)
+        
+        let wk = Array(floats[ptr..<(ptr + config.numLayers * config.dim * (config.numKvHeads * headSize))])
+        ptr += config.numLayers * config.dim * (config.numKvHeads * headSize)
+        
+        let wv = Array(floats[ptr..<(ptr + config.numLayers * config.dim * (config.numKvHeads * headSize))])
+        ptr += config.numLayers * config.dim * (config.numKvHeads * headSize)
+        
+        let wo = Array(floats[ptr..<(ptr + config.numLayers * (config.numHeads * headSize) * config.dim)])
+        ptr += config.numLayers * (config.numHeads * headSize) * config.dim
+        
+        let rmsFfnWeight = Array(floats[ptr..<(ptr + config.numLayers * config.dim)])
+        ptr += config.numLayers * config.dim
+        
+        let w1 = Array(floats[ptr..<(ptr + config.numLayers * config.dim * config.hiddenDim)])
+        ptr += config.numLayers * config.dim * config.hiddenDim
+        
+        let w2 = Array(floats[ptr..<(ptr + config.numLayers * config.hiddenDim * config.dim)])
+        ptr += config.numLayers * config.hiddenDim * config.dim
+        
+        let w3 = Array(floats[ptr..<(ptr + config.numLayers * config.dim * config.hiddenDim)])
+        ptr += config.numLayers * config.dim * config.hiddenDim
+        
+        let rmsFinalWeight = Array(floats[ptr..<(ptr + config.dim)])
+        ptr += config.dim
+        
+        // Skip RoPE frequency tables (freq_cis_real and freq_cis_imag)
+        ptr += config.seqLen * headSize / 2 // freq_cis_real
+        ptr += config.seqLen * headSize / 2 // freq_cis_imag
+        
+        // Handle classifier weights
+        let wcls: [Float]?
+        if sharedWeights {
+            wcls = nil // Use token embedding table for shared weights
+        } else {
+            wcls = Array(floats[ptr..<(ptr + config.vocabSize * config.dim)])
+        }
+        
+        return TransformerWeights(
+            tokenEmbeddingTable: tokenEmbeddingTable,
+            rmsAttWeight: rmsAttWeight,
+            rmsFfnWeight: rmsFfnWeight,
+            wq: wq,
+            wk: wk,
+            wv: wv,
+            wo: wo,
+            w1: w1,
+            w2: w2,
+            w3: w3,
+            rmsFinalWeight: rmsFinalWeight,
+            wcls: wcls
+        )
+    }
+}
+
 struct RunState {
     // current wave of activations
     var x: [Float] // activation at current time stamp (dim,)

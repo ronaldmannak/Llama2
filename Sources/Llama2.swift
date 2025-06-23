@@ -110,7 +110,7 @@ struct Llama2: ParsableCommand {
     )
     
     @Argument(help: "Path to the model checkpoint file (e.g., out/model.bin)")
-    var checkpointPath: String
+    var checkpointPath: String = Bundle.module.path(forResource: "stories260K", ofType: "bin") ?? ""
     
     @Option(name: .customShort("t"), help: "Temperature in [0,inf], default 1.0")
     var temperature: Float = 1.0
@@ -128,7 +128,7 @@ struct Llama2: ParsableCommand {
     var prompt: String?
     
     @Option(name: .customShort("z"), help: "Optional path to custom tokenizer")
-    var tokenizerPath: String = "Resources/tokenizer.json"
+    var tokenizerPath: String = Bundle.module.path(forResource: "tokenizer", ofType: "json") ?? ""
     
     @Option(name: .customShort("m"), help: "Mode: generate|chat, default: generate")
     var mode: Mode = .generate
@@ -153,20 +153,15 @@ struct Llama2: ParsableCommand {
         }
         
         // Handle tokenizer path - try bundled resource first, then fallback to file system
-        let actualTokenizerPath: String
-        if let bundledPath = AssetHelper.resourcePath(name: "tokenizer", type: "json") {
-            actualTokenizerPath = bundledPath
-        } else if FileManager.default.fileExists(atPath: tokenizerPath) {
-            actualTokenizerPath = tokenizerPath
-        } else {
-            throw Llama2Error.fileNotFound("tokenizer.json not found in Resources or at specified path: \(tokenizerPath)")
+        guard FileManager.default.fileExists(atPath: tokenizerPath) else {
+            throw Llama2Error.fileNotFound("tokenizer.json not found in bundled resources or at specified path: \(tokenizerPath)")
         }
         
         // Read checkpoint file
         let (config, weights) = try readCheckpoint(from: checkpointPath)
         
         // Create components with actual model data
-        let tokenizer = try Tokenizer(tokenizerPath: actualTokenizerPath)
+        let tokenizer = try Tokenizer(tokenizerPath: tokenizerPath)
         let transformer = Transformer(config: config, weights: weights)
         let sampler = Sampler(temperature: params.temperature, topp: params.topP, seed: params.seed)
         
@@ -190,88 +185,6 @@ struct Llama2: ParsableCommand {
         }
         
         print(output)
-    }
-}
-
-// MARK: - Weight Mapping and Checkpoint Reading
-
-extension TransformerWeights {
-    /// Maps binary data to weight arrays, equivalent to C's memory_map_weights
-    static func mapFromData(_ data: Data, config: Config, sharedWeights: Bool) -> TransformerWeights {
-        let headSize = config.dim / config.numHeads
-        let kvDim = (config.dim * config.numKvHeads) / config.numHeads
-        
-        // Convert Data to [Float] for easier manipulation
-        let floatCount = data.count / MemoryLayout<Float>.size
-        let floats = data.withUnsafeBytes { bytes in
-            Array(bytes.bindMemory(to: Float.self).prefix(floatCount))
-        }
-        
-        var ptr = 0
-        
-        // Skip the config header (already read)
-        ptr += MemoryLayout<Config>.size / MemoryLayout<Float>.size
-        
-        // Map weights in the same order as C code
-        let tokenEmbeddingTable = Array(floats[ptr..<(ptr + config.vocabSize * config.dim)])
-        ptr += config.vocabSize * config.dim
-        
-        let rmsAttWeight = Array(floats[ptr..<(ptr + config.numLayers * config.dim)])
-        ptr += config.numLayers * config.dim
-        
-        let wq = Array(floats[ptr..<(ptr + config.numLayers * config.dim * (config.numHeads * headSize))])
-        ptr += config.numLayers * config.dim * (config.numHeads * headSize)
-        
-        let wk = Array(floats[ptr..<(ptr + config.numLayers * config.dim * (config.numKvHeads * headSize))])
-        ptr += config.numLayers * config.dim * (config.numKvHeads * headSize)
-        
-        let wv = Array(floats[ptr..<(ptr + config.numLayers * config.dim * (config.numKvHeads * headSize))])
-        ptr += config.numLayers * config.dim * (config.numKvHeads * headSize)
-        
-        let wo = Array(floats[ptr..<(ptr + config.numLayers * (config.numHeads * headSize) * config.dim)])
-        ptr += config.numLayers * (config.numHeads * headSize) * config.dim
-        
-        let rmsFfnWeight = Array(floats[ptr..<(ptr + config.numLayers * config.dim)])
-        ptr += config.numLayers * config.dim
-        
-        let w1 = Array(floats[ptr..<(ptr + config.numLayers * config.dim * config.hiddenDim)])
-        ptr += config.numLayers * config.dim * config.hiddenDim
-        
-        let w2 = Array(floats[ptr..<(ptr + config.numLayers * config.hiddenDim * config.dim)])
-        ptr += config.numLayers * config.hiddenDim * config.dim
-        
-        let w3 = Array(floats[ptr..<(ptr + config.numLayers * config.dim * config.hiddenDim)])
-        ptr += config.numLayers * config.dim * config.hiddenDim
-        
-        let rmsFinalWeight = Array(floats[ptr..<(ptr + config.dim)])
-        ptr += config.dim
-        
-        // Skip RoPE frequency tables (freq_cis_real and freq_cis_imag)
-        ptr += config.seqLen * headSize / 2 // freq_cis_real
-        ptr += config.seqLen * headSize / 2 // freq_cis_imag
-        
-        // Handle classifier weights
-        let wcls: [Float]?
-        if sharedWeights {
-            wcls = nil // Use token embedding table for shared weights
-        } else {
-            wcls = Array(floats[ptr..<(ptr + config.vocabSize * config.dim)])
-        }
-        
-        return TransformerWeights(
-            tokenEmbeddingTable: tokenEmbeddingTable,
-            rmsAttWeight: rmsAttWeight,
-            rmsFfnWeight: rmsFfnWeight,
-            wq: wq,
-            wk: wk,
-            wv: wv,
-            wo: wo,
-            w1: w1,
-            w2: w2,
-            w3: w3,
-            rmsFinalWeight: rmsFinalWeight,
-            wcls: wcls
-        )
     }
 }
 
