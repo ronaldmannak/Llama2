@@ -55,7 +55,9 @@ struct Config {
     let numKvHeads: Int // number of key/value heads (can be < query heads because of multiquery)
     let vocabSize: Int // vocabulary size, usually 256 (byte-level)
     let seqLen: Int // max sequence length
-    
+}
+
+extension Config {
     // Convenience initializer for backward compatibility
     init(vocabSize: Int, seqLen: Int, embeddingDim: Int = 4096, numLayers: Int = 32, numHeads: Int = 32) {
         self.dim = embeddingDim
