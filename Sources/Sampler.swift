@@ -7,13 +7,23 @@
 
 import Foundation
 
+// MARK: - ProbIndex Structure
+
+/// Structure used when sorting probabilities during top-p sampling
+struct ProbIndex {
+    let prob: Float
+    let index: Int
+}
+
+// MARK: - Sampler
 
 struct Sampler {
     private let temperature: Float
     private let topP: Float
     private var rng: any RandomNumberGenerator
+    private var probIndexBuffer: [ProbIndex]
     
-    init(temperature: Float, topp: Float, seed: UInt64) {
+    init(temperature: Float, topp: Float, seed: UInt64, vocabSize: Int = 32000) {
         self.temperature = temperature
         self.topP = topp
         // Use seeded RNG if seed is provided, otherwise use system RNG
@@ -22,11 +32,131 @@ struct Sampler {
         } else {
             self.rng = SeededRandomNumberGenerator(seed: seed)
         }
+        // Pre-allocate buffer for top-p sampling
+        self.probIndexBuffer = Array(repeating: ProbIndex(prob: 0.0, index: 0), count: vocabSize)
     }
     
+    /// Sample the token given the logits and hyperparameters
+    /// - Parameter logits: Array of logits from the model
+    /// - Returns: Index of the sampled token
     mutating func sample(logits: [Float]) -> Int {
-        // TODO: Implement actual sampling with temperature and top-p
-        return Int.random(in: 0..<logits.count, using: &rng)
+        let vocabSize = logits.count
+        
+        if temperature == 0.0 {
+            // Greedy argmax sampling: take the token with the highest probability
+            return sampleArgmax(probabilities: logits, n: vocabSize)
+        } else {
+            // Apply temperature to the logits
+            var temperatureAdjustedLogits = logits
+            for i in 0..<vocabSize {
+                temperatureAdjustedLogits[i] /= temperature
+            }
+            
+            // Apply softmax to get probabilities
+            softmax(values: &temperatureAdjustedLogits, size: vocabSize)
+            
+            // Generate random value for sampling
+            let coin = Float.random(in: 0..<1, using: &rng)            
+            
+            // Sample from the distribution
+            if topP <= 0 || topP >= 1 {
+                // Simply sample from the predicted probability distribution
+                return sampleMult(probabilities: temperatureAdjustedLogits, n: vocabSize, coin: coin)
+            } else {
+                // Top-p (nucleus) sampling, clamping the least likely tokens to zero
+                return sampleTopp(probabilities: temperatureAdjustedLogits, n: vocabSize, topp: topP, coin: coin)
+            }
+        }
+    }
+    
+    // MARK: - Sampling Methods
+    
+    /// Return the index that has the highest probability
+    /// - Parameters:
+    ///   - probabilities: Array of probabilities
+    ///   - n: Size of the array
+    /// - Returns: Index of the maximum probability
+    private func sampleArgmax(probabilities: [Float], n: Int) -> Int {
+        var maxIndex = 0
+        var maxProb = probabilities[0]
+        
+        for i in 1..<n {
+            if probabilities[i] > maxProb {
+                maxIndex = i
+                maxProb = probabilities[i]
+            }
+        }
+        return maxIndex
+    }
+    
+    /// Sample index from probabilities (they must sum to 1!)
+    /// - Parameters:
+    ///   - probabilities: Array of probabilities that sum to 1
+    ///   - n: Size of the array
+    ///   - coin: Random number in [0, 1)
+    /// - Returns: Sampled index
+    private func sampleMult(probabilities: [Float], n: Int, coin: Float) -> Int {
+        var cdf: Float = 0.0
+        
+        for i in 0..<n {
+            cdf += probabilities[i]
+            if coin < cdf {
+                return i
+            }
+        }
+        return n - 1 // In case of rounding errors
+    }
+    
+    /// Top-p sampling (or "nucleus sampling") samples from the smallest set of
+    /// tokens that exceed probability topp
+    /// - Parameters:
+    ///   - probabilities: Array of probabilities
+    ///   - n: Size of the array
+    ///   - topp: Top-p threshold
+    ///   - coin: Random number in [0, 1)
+    /// - Returns: Sampled index
+    private mutating func sampleTopp(probabilities: [Float], n: Int, topp: Float, coin: Float) -> Int {
+        var n0 = 0
+        
+        // Quicksort indices in descending order of probabilities
+        // Values smaller than (1 - topp) / (n - 1) cannot be part of the result
+        // so for efficiency we crop these out as candidates before sorting
+        let cutoff = (1.0 - topp) / Float(n - 1)
+        
+        for i in 0..<n {
+            if probabilities[i] >= cutoff {
+                probIndexBuffer[n0] = ProbIndex(prob: probabilities[i], index: i)
+                n0 += 1
+            }
+        }
+        
+        // Sort by probability in descending order
+        probIndexBuffer[0..<n0].sort { $0.prob > $1.prob }
+        
+        // Truncate the list where cumulative probability exceeds topp
+        var cumulativeProb: Float = 0.0
+        var lastIdx = n0 - 1 // In case of rounding errors consider all elements
+        
+        for i in 0..<n0 {
+            cumulativeProb += probIndexBuffer[i].prob
+            if cumulativeProb > topp {
+                lastIdx = i
+                break // We've exceeded topp by including lastIdx
+            }
+        }
+        
+        // Sample from the truncated list
+        let r = coin * cumulativeProb
+        var cdf: Float = 0.0
+        
+        for i in 0...lastIdx {
+            cdf += probIndexBuffer[i].prob
+            if r < cdf {
+                return probIndexBuffer[i].index
+            }
+        }
+        
+        return probIndexBuffer[lastIdx].index // In case of rounding errors
     }
 }
 
