@@ -381,11 +381,3 @@ struct Tokenizer {
         return vocab["</s>"] ?? 2
     }
 }
-
-/// Errors that can occur during tokenizer operations
-enum TokenizerError: Error {
-    case invalidFileFormat(String)
-    case fileNotFound
-    case decodingError
-    case jsonDecodingError(Error)
-}
