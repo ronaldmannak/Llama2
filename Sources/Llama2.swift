@@ -110,7 +110,7 @@ struct Llama2: ParsableCommand {
     )
     
     @Argument(help: "Path to the model checkpoint file (e.g., out/model.bin)")
-    var checkpointPath: String = Bundle.module.path(forResource: "stories260K", ofType: "bin") ?? ""
+    var checkpointPath: String = Bundle.module.path(forResource: "Resources/stories260K", ofType: "bin") ?? ""
     
     @Option(name: .customShort("t"), help: "Temperature in [0,inf], default 1.0")
     var temperature: Float = 1.0
@@ -128,7 +128,7 @@ struct Llama2: ParsableCommand {
     var prompt: String?
     
     @Option(name: .customShort("z"), help: "Optional path to custom tokenizer")
-    var tokenizerPath: String = Bundle.module.path(forResource: "tokenizer", ofType: "json") ?? ""
+    var tokenizerPath: String = Bundle.module.path(forResource: "Resources/tokenizer", ofType: "json") ?? "uh-oh"
     
     @Option(name: .customShort("m"), help: "Mode: generate|chat, default: generate")
     var mode: Mode = .generate
@@ -158,13 +158,13 @@ struct Llama2: ParsableCommand {
         }
         
         // Read checkpoint file
-        let (config, weights) = try readCheckpoint(from: checkpointPath)
+//        let (config, weights) = try readCheckpoint(from: checkpointPath)
         
         // Create components with actual model data
         let tokenizer = try Tokenizer(tokenizerPath: tokenizerPath)
-        let transformer = Transformer(config: config, weights: weights)
+//        let transformer = Transformer(config: config, weights: weights)
         let sampler = Sampler(temperature: params.temperature, topp: params.topP, seed: params.seed)
-        
+        /*
         // Create engine
         let engine = Llama2Engine(
             transformer: transformer,
@@ -185,6 +185,12 @@ struct Llama2: ParsableCommand {
         }
         
         print(output)
+         */
+        
+        print(tokenizer.config.model.type)
+        print(tokenizer.config.model.unkToken)
+        print(tokenizer.vocab.count)
+//        print(tokenizer.vocab)
     }
 }
 

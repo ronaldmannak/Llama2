@@ -16,7 +16,6 @@ let package = Package(
             dependencies: [
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
             ],
-//            path: "Sources/Llama2",
             resources: [
                 .copy("Resources")
             ]

@@ -126,12 +126,12 @@ struct TokenizerConfig: Codable {
 /// Unlike Llama2.c, which leverages a binary file format for its tokenizer,
 /// this implementation uses Hugging Face's `tokenizer.json` for educational purposes.
 struct Tokenizer {
-    private let config: TokenizerConfig
-    private let vocab: [String: Int]
-    private let reverseVocab: [Int: String]
-    private let merges: [String]
-    private var sortedVocab: [TokenIndex]?
-    private let bytePieces: [String]
+    let config: TokenizerConfig
+    let vocab: [String: Int]
+    let reverseVocab: [Int: String]
+    let merges: [String]
+    var sortedVocab: [TokenIndex]?
+    let bytePieces: [String]
     
     /// Initialize tokenizer from a JSON file path
     init(tokenizerPath: String) throws {
