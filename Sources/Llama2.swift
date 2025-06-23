@@ -13,7 +13,7 @@ enum Llama2Error: Error, LocalizedError {
     case invalidMode(String)
     case invalidParameter(String)
     case invalidTemperature(Float)
-    case invalidTopp(Float)
+    case invalidTopP(Float)
     case invalidSteps(Int)
     case fileNotFound(String)
     
@@ -25,7 +25,7 @@ enum Llama2Error: Error, LocalizedError {
             return "Invalid parameter: \(param)"
         case .invalidTemperature(let temp):
             return "Temperature must be >= 0.0, got: \(temp)"
-        case .invalidTopp(let topp):
+        case .invalidTopP(let topp):
             return "Top-p must be between 0.0 and 1.0, got: \(topp)"
         case .invalidSteps(let steps):
             return "Steps must be >= 0, got: \(steps)"
@@ -171,12 +171,12 @@ struct Tokenizer {
 
 struct Sampler {
     private let temperature: Float
-    private let topp: Float
+    private let topP: Float
     private var rng: RandomNumberGenerator
     
     init(temperature: Float, topp: Float, seed: UInt64) {
         self.temperature = temperature
-        self.topp = topp
+        self.topP = topp
         self.rng = RandomNumberGenerator(seed: seed)
     }
     
@@ -263,7 +263,7 @@ struct GenerationParameters {
         
         // Validate topp
         guard topP >= 0.0 && topP <= 1.0 else {
-            throw Llama2Error.invalidTopp(topP)
+            throw Llama2Error.invalidTopP(topP)
         }
         
         // Validate steps
@@ -298,7 +298,7 @@ struct Llama2: ParsableCommand {
     var temperature: Float = 1.0
     
     @Option(name: .customShort("p"), help: "P value in top-p (nucleus) sampling in [0,1], default 0.9")
-    var topp: Float = 0.9
+    var topP: Float = 0.9
     
     @Option(name: .customShort("s"), help: "Random seed, default time(NULL)")
     var seed: UInt64 = 0
@@ -322,7 +322,7 @@ struct Llama2: ParsableCommand {
         // Validate and prepare parameters
         let params = try GenerationParameters(
             temperature: temperature,
-            topP: topp,
+            topP: topP,
             seed: seed,
             steps: steps,
             prompt: prompt,
