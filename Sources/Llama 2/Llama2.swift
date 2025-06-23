@@ -128,7 +128,7 @@ struct Llama2: ParsableCommand {
     var prompt: String?
     
     @Option(name: .customShort("z"), help: "Optional path to custom tokenizer")
-    var tokenizerPath: String = "tokenizer.bin"
+    var tokenizerPath: String = "Resources/tokenizer.json"
     
     @Option(name: .customShort("m"), help: "Mode: generate|chat, default: generate")
     var mode: Mode = .generate
@@ -151,15 +151,22 @@ struct Llama2: ParsableCommand {
         guard FileManager.default.fileExists(atPath: checkpointPath) else {
             throw Llama2Error.fileNotFound(checkpointPath)
         }
-        guard FileManager.default.fileExists(atPath: tokenizerPath) else {
-            throw Llama2Error.fileNotFound(tokenizerPath)
+        
+        // Handle tokenizer path - try bundled resource first, then fallback to file system
+        let actualTokenizerPath: String
+        if let bundledPath = AssetHelper.resourcePath(name: "tokenizer", type: "json") {
+            actualTokenizerPath = bundledPath
+        } else if FileManager.default.fileExists(atPath: tokenizerPath) {
+            actualTokenizerPath = tokenizerPath
+        } else {
+            throw Llama2Error.fileNotFound("tokenizer.json not found in Resources or at specified path: \(tokenizerPath)")
         }
         
         // Read checkpoint file
         let (config, weights) = try readCheckpoint(from: checkpointPath)
         
         // Create components with actual model data
-        let tokenizer = try Tokenizer(tokenizerPath: tokenizerPath)
+        let tokenizer = try Tokenizer(tokenizerPath: actualTokenizerPath)
         let transformer = Transformer(config: config, weights: weights)
         let sampler = Sampler(temperature: params.temperature, topp: params.topP, seed: params.seed)
         
