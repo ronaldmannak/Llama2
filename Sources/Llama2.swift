@@ -146,23 +146,10 @@ struct Llama2: ParsableCommand {
             prompt: prompt,
             systemPrompt: systemPrompt
         )
-        
-        // Validate files exist
-        guard FileManager.default.fileExists(atPath: checkpointPath) else {
-            throw Llama2Error.fileNotFound(checkpointPath)
-        }
-        
-        // Handle tokenizer path - try bundled resource first, then fallback to file system
-        guard FileManager.default.fileExists(atPath: tokenizerPath) else {
-            throw Llama2Error.fileNotFound("tokenizer.json not found in bundled resources or at specified path: \(tokenizerPath)")
-        }
-        
-        // Read checkpoint file
-//        let (config, weights) = try readCheckpoint(from: checkpointPath)
-        
+                
         // Create components with actual model data
         let tokenizer = try Tokenizer(tokenizerPath: tokenizerPath)
-//        let transformer = Transformer(config: config, weights: weights)
+//        let transformer = Transformer(checkpointPath: checkpointPath)
         let sampler = Sampler(temperature: params.temperature, topp: params.topP, seed: params.seed)
         /*
         // Create engine
@@ -192,43 +179,6 @@ struct Llama2: ParsableCommand {
         print(tokenizer.vocab.count)
 //        print(tokenizer.vocab)
     }
-}
-
-/// Reads a checkpoint file and returns the config and weights
-func readCheckpoint(from path: String) throws -> (config: Config, weights: TransformerWeights) {
-    let fileURL = URL(fileURLWithPath: path)
-    let data = try Data(contentsOf: fileURL)
-    
-    // Read config from the beginning of the file
-    let configSize = MemoryLayout<Config>.size
-    guard data.count >= configSize else {
-        throw Llama2Error.invalidParameter("File too small to contain config")
-    }
-    
-    let configData = data.prefix(configSize)
-    let config = configData.withUnsafeBytes { bytes in
-        bytes.load(as: Config.self)
-    }
-    
-    // Check for shared weights (negative vocab size indicates unshared weights)
-    let sharedWeights = config.vocabSize > 0
-    let actualVocabSize = abs(config.vocabSize)
-    
-    // Create a new config with the corrected vocab size
-    let correctedConfig = Config(
-        dim: config.dim,
-        hiddenDim: config.hiddenDim,
-        numLayers: config.numLayers,
-        numHeads: config.numHeads,
-        numKvHeads: config.numKvHeads,
-        vocabSize: actualVocabSize,
-        seqLen: config.seqLen
-    )
-    
-    // Map the weights from the remaining data
-    let weights = TransformerWeights.mapFromData(data, config: correctedConfig, sharedWeights: sharedWeights)
-    
-    return (correctedConfig, weights)
 }
 
 /*

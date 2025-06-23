@@ -135,6 +135,12 @@ struct Tokenizer {
     
     /// Initialize tokenizer from a JSON file path
     init(tokenizerPath: String) throws {
+
+        // Sanity check
+        guard FileManager.default.fileExists(atPath: tokenizerPath) else {
+            throw Llama2Error.fileNotFound("tokenizer.json not found in bundled resources or at specified path: \(tokenizerPath)")
+        }
+        
         // Read and decode the JSON file with automatic snake_case to camelCase conversion
         let data = try Data(contentsOf: URL(fileURLWithPath: tokenizerPath))
         let decoder = JSONDecoder()
@@ -202,28 +208,28 @@ struct Tokenizer {
     }
     
     /// Efficiently find the perfect match for str in vocab, return its index or -1 if not found
-    private func strLookup(_ str: String, sortedVocab: [TokenIndex]) -> Int {
-        let token = TokenIndex(str: str, id: -1)
-        
-        // Binary search for the token
-        var left = 0
-        var right = sortedVocab.count - 1
-        
-        while left <= right {
-            let mid = (left + right) / 2
-            let comparison = str.compare(sortedVocab[mid].str)
-            
-            if comparison == .orderedSame {
-                return sortedVocab[mid].id
-            } else if comparison == .orderedAscending {
-                right = mid - 1
-            } else {
-                left = mid + 1
-            }
-        }
-        
-        return -1
-    }
+//    private func strLookup(_ str: String, sortedVocab: [TokenIndex]) -> Int {
+//        let token = TokenIndex(str: str, id: -1)
+//        
+//        // Binary search for the token
+//        var left = 0
+//        var right = sortedVocab.count - 1
+//        
+//        while left <= right {
+//            let mid = (left + right) / 2
+//            let comparison = str.compare(sortedVocab[mid].str)
+//            
+//            if comparison == .orderedSame {
+//                return sortedVocab[mid].id
+//            } else if comparison == .orderedAscending {
+//                right = mid - 1
+//            } else {
+//                left = mid + 1
+//            }
+//        }
+//        
+//        return -1
+//    }
     
     /// Encode a string into tokens using BPE
     mutating func encode(text: String, bos: Bool = false, eos: Bool = false) -> [Int] {
@@ -279,7 +285,7 @@ struct Tokenizer {
         
         // Tokenize each word using BPE
         for word in wordTokens {
-            var wordTokens = tokenizeWord(word, sortedVocab: sortedVocab)
+            let wordTokens = tokenizeWord(word, sortedVocab: sortedVocab)
             tokens.append(contentsOf: wordTokens)
         }
         
