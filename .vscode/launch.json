@@ -1,0 +1,22 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:Llama2}",
+            "name": "Debug Llama2",
+            "program": "${workspaceFolder:Llama2}/.build/debug/Llama2",
+            "preLaunchTask": "swift: Build Debug Llama2"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:Llama2}",
+            "name": "Release Llama2",
+            "program": "${workspaceFolder:Llama2}/.build/release/Llama2",
+            "preLaunchTask": "swift: Build Release Llama2"
+        }
+    ]
+}
