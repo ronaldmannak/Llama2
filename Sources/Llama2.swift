@@ -72,23 +72,51 @@ extension Config {
 
 struct TransformerWeights {
     // token embedding table
-    let tokenEmbeddingTable: [Float] = [] // (vocab_size, dim)
+    let tokenEmbeddingTable: [Float] // (vocab_size, dim)
     // weights for rmsnorms
-    let rmsAttWeight: [Float] = [] // (layer, dim) rmsnorm weights
-    let rmsFfnWeight: [Float] = [] // (layer, dim)
+    let rmsAttWeight: [Float] // (layer, dim) rmsnorm weights
+    let rmsFfnWeight: [Float] // (layer, dim)
     // weights for matmuls. note dim == n_heads * head_size
-    let wq: [Float] = [] // (layer, dim, n_heads * head_size)
-    let wk: [Float] = [] // (layer, dim, n_kv_heads * head_size)
-    let wv: [Float] = [] // (layer, dim, n_kv_heads * head_size)
-    let wo: [Float] = [] // (layer, n_heads * head_size, dim)
+    let wq: [Float] // (layer, dim, n_heads * head_size)
+    let wk: [Float] // (layer, dim, n_kv_heads * head_size)
+    let wv: [Float] // (layer, dim, n_kv_heads * head_size)
+    let wo: [Float] // (layer, n_heads * head_size, dim)
     // weights for ffn
-    let w1: [Float] = [] // (layer, hidden_dim, dim)
-    let w2: [Float] = [] // (layer, dim, hidden_dim)
-    let w3: [Float] = [] // (layer, hidden_dim, dim)
+    let w1: [Float] // (layer, hidden_dim, dim)
+    let w2: [Float] // (layer, dim, hidden_dim)
+    let w3: [Float] // (layer, hidden_dim, dim)
     // final rmsnorm
-    let rmsFinalWeight: [Float] = [] // (dim,)
+    let rmsFinalWeight: [Float] // (dim,)
     // (optional) classifier weights for the logits, on the last layer
-    let wcls: [Float]? = nil
+    let wcls: [Float]? // (vocab_size, dim) or nil if shared weights
+    
+    init(
+        tokenEmbeddingTable: [Float] = [],
+        rmsAttWeight: [Float] = [],
+        rmsFfnWeight: [Float] = [],
+        wq: [Float] = [],
+        wk: [Float] = [],
+        wv: [Float] = [],
+        wo: [Float] = [],
+        w1: [Float] = [],
+        w2: [Float] = [],
+        w3: [Float] = [],
+        rmsFinalWeight: [Float] = [],
+        wcls: [Float]? = nil
+    ) {
+        self.tokenEmbeddingTable = tokenEmbeddingTable
+        self.rmsAttWeight = rmsAttWeight
+        self.rmsFfnWeight = rmsFfnWeight
+        self.wq = wq
+        self.wk = wk
+        self.wv = wv
+        self.wo = wo
+        self.w1 = w1
+        self.w2 = w2
+        self.w3 = w3
+        self.rmsFinalWeight = rmsFinalWeight
+        self.wcls = wcls
+    }
 }
 
 struct RunState {
@@ -113,6 +141,7 @@ struct RunState {
         let numLayers = config.numLayers
         let numHeads = config.numHeads
         let seqLen = config.seqLen
+        let kvDim = (dim * config.numKvHeads) / numHeads // KV cache dimension
         
         self.x = Array(repeating: 0.0, count: dim)
         self.xb = Array(repeating: 0.0, count: dim)
@@ -124,8 +153,8 @@ struct RunState {
         self.v = Array(repeating: 0.0, count: dim)
         self.att = Array(repeating: 0.0, count: numHeads * seqLen)
         self.logits = Array(repeating: 0.0, count: config.vocabSize)
-        self.keyCache = Array(repeating: 0.0, count: numLayers * seqLen * dim)
-        self.valueCache = Array(repeating: 0.0, count: numLayers * seqLen * dim)
+        self.keyCache = Array(repeating: 0.0, count: numLayers * seqLen * kvDim)
+        self.valueCache = Array(repeating: 0.0, count: numLayers * seqLen * kvDim)
     }
 }
 
@@ -133,14 +162,11 @@ class Transformer {
     let config: Config // the hyperparameters of the architecture (the blueprint)
     let weights: TransformerWeights // the weights of the model
     var state: RunState // buffers for the "wave" of activations in the forward pass
-    // Model data loaded from checkpoint file
-    private let modelData: Data
     
-    init(config: Config, weights: TransformerWeights = TransformerWeights(), modelData: Data = Data()) {
+    init(config: Config, weights: TransformerWeights = TransformerWeights()) {
         self.config = config
         self.weights = weights
         self.state = RunState(config: config)
-        self.modelData = modelData
     }
     
     func forward(tokens: [Int]) -> [Float] {
@@ -339,8 +365,11 @@ struct Llama2: ParsableCommand {
             throw Llama2Error.fileNotFound(tokenizerPath)
         }
         
-        // Create components directly
-        let transformer = Transformer(config: Config(vocabSize: 32000, seqLen: 2048))
+        // Read checkpoint file
+        let (config, weights) = try readCheckpoint(from: checkpointPath)
+        
+        // Create components with actual model data
+        let transformer = Transformer(config: config, weights: weights)
         let tokenizer = Tokenizer()
         let sampler = Sampler(temperature: params.temperature, topp: params.topP, seed: params.seed)
         
@@ -367,6 +396,121 @@ struct Llama2: ParsableCommand {
     }
 }
 
-/*
- Port this C code to this Swift project. Create stub functions for the tokenizer, sampler, and transformer and other custom objects or functions. Make sure the code conforms to modern Swift 6.1 standards and follows Swift-idiomatic patterns including automatic memory management, value types where appropriate, and Swift's built-in data structures like Data for file handling. Avoid manual memory management and low-level system calls in favor of Swift's safe, automatic memory management.
- */
+// MARK: - Weight Mapping and Checkpoint Reading
+
+extension TransformerWeights {
+    /// Maps binary data to weight arrays, equivalent to C's memory_map_weights
+    static func mapFromData(_ data: Data, config: Config, sharedWeights: Bool) -> TransformerWeights {
+        let headSize = config.dim / config.numHeads
+        let kvDim = (config.dim * config.numKvHeads) / config.numHeads
+        
+        // Convert Data to [Float] for easier manipulation
+        let floatCount = data.count / MemoryLayout<Float>.size
+        let floats = data.withUnsafeBytes { bytes in
+            Array(bytes.bindMemory(to: Float.self).prefix(floatCount))
+        }
+        
+        var ptr = 0
+        
+        // Skip the config header (already read)
+        ptr += MemoryLayout<Config>.size / MemoryLayout<Float>.size
+        
+        // Map weights in the same order as C code
+        let tokenEmbeddingTable = Array(floats[ptr..<(ptr + config.vocabSize * config.dim)])
+        ptr += config.vocabSize * config.dim
+        
+        let rmsAttWeight = Array(floats[ptr..<(ptr + config.numLayers * config.dim)])
+        ptr += config.numLayers * config.dim
+        
+        let wq = Array(floats[ptr..<(ptr + config.numLayers * config.dim * (config.numHeads * headSize))])
+        ptr += config.numLayers * config.dim * (config.numHeads * headSize)
+        
+        let wk = Array(floats[ptr..<(ptr + config.numLayers * config.dim * (config.numKvHeads * headSize))])
+        ptr += config.numLayers * config.dim * (config.numKvHeads * headSize)
+        
+        let wv = Array(floats[ptr..<(ptr + config.numLayers * config.dim * (config.numKvHeads * headSize))])
+        ptr += config.numLayers * config.dim * (config.numKvHeads * headSize)
+        
+        let wo = Array(floats[ptr..<(ptr + config.numLayers * (config.numHeads * headSize) * config.dim)])
+        ptr += config.numLayers * (config.numHeads * headSize) * config.dim
+        
+        let rmsFfnWeight = Array(floats[ptr..<(ptr + config.numLayers * config.dim)])
+        ptr += config.numLayers * config.dim
+        
+        let w1 = Array(floats[ptr..<(ptr + config.numLayers * config.dim * config.hiddenDim)])
+        ptr += config.numLayers * config.dim * config.hiddenDim
+        
+        let w2 = Array(floats[ptr..<(ptr + config.numLayers * config.hiddenDim * config.dim)])
+        ptr += config.numLayers * config.hiddenDim * config.dim
+        
+        let w3 = Array(floats[ptr..<(ptr + config.numLayers * config.dim * config.hiddenDim)])
+        ptr += config.numLayers * config.dim * config.hiddenDim
+        
+        let rmsFinalWeight = Array(floats[ptr..<(ptr + config.dim)])
+        ptr += config.dim
+        
+        // Skip RoPE frequency tables (freq_cis_real and freq_cis_imag)
+        ptr += config.seqLen * headSize / 2 // freq_cis_real
+        ptr += config.seqLen * headSize / 2 // freq_cis_imag
+        
+        // Handle classifier weights
+        let wcls: [Float]?
+        if sharedWeights {
+            wcls = nil // Use token embedding table for shared weights
+        } else {
+            wcls = Array(floats[ptr..<(ptr + config.vocabSize * config.dim)])
+        }
+        
+        return TransformerWeights(
+            tokenEmbeddingTable: tokenEmbeddingTable,
+            rmsAttWeight: rmsAttWeight,
+            rmsFfnWeight: rmsFfnWeight,
+            wq: wq,
+            wk: wk,
+            wv: wv,
+            wo: wo,
+            w1: w1,
+            w2: w2,
+            w3: w3,
+            rmsFinalWeight: rmsFinalWeight,
+            wcls: wcls
+        )
+    }
+}
+
+/// Reads a checkpoint file and returns the config and weights
+func readCheckpoint(from path: String) throws -> (config: Config, weights: TransformerWeights) {
+    let fileURL = URL(fileURLWithPath: path)
+    let data = try Data(contentsOf: fileURL)
+    
+    // Read config from the beginning of the file
+    let configSize = MemoryLayout<Config>.size
+    guard data.count >= configSize else {
+        throw Llama2Error.invalidParameter("File too small to contain config")
+    }
+    
+    let configData = data.prefix(configSize)
+    let config = configData.withUnsafeBytes { bytes in
+        bytes.load(as: Config.self)
+    }
+    
+    // Check for shared weights (negative vocab size indicates unshared weights)
+    let sharedWeights = config.vocabSize > 0
+    let actualVocabSize = abs(config.vocabSize)
+    
+    // Create a new config with the corrected vocab size
+    let correctedConfig = Config(
+        dim: config.dim,
+        hiddenDim: config.hiddenDim,
+        numLayers: config.numLayers,
+        numHeads: config.numHeads,
+        numKvHeads: config.numKvHeads,
+        vocabSize: actualVocabSize,
+        seqLen: config.seqLen
+    )
+    
+    // Map the weights from the remaining data
+    let weights = TransformerWeights.mapFromData(data, config: correctedConfig, sharedWeights: sharedWeights)
+    
+    return (correctedConfig, weights)
+}
