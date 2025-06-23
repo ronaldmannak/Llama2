@@ -15,6 +15,7 @@ enum Llama2Error: Error, LocalizedError {
     case invalidTopP(Float)
     case invalidSteps(Int)
     case fileNotFound(String)
+    case unsupportedTokenizer(String)
     
     var errorDescription: String? {
         switch self {
@@ -30,6 +31,8 @@ enum Llama2Error: Error, LocalizedError {
             return "Steps must be >= 0, got: \(steps)"
         case .fileNotFound(let path):
             return "File not found: \(path)"
+        case .unsupportedTokenizer(let string):
+            return "Unsupported tokenizer: Expected BPE, got: \(string)"
         }
     }
 }

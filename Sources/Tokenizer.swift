@@ -147,6 +147,10 @@ struct Tokenizer {
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         self.config = try decoder.decode(TokenizerConfig.self, from: data)
         
+        guard config.model.type == "BPE" else {
+            throw Llama2Error.unsupportedTokenizer(config.model.type)
+        }
+        
         // Initialize vocabulary
         self.vocab = config.model.vocab
         self.merges = config.model.merges
