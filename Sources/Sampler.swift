@@ -56,7 +56,7 @@ struct Sampler {
             softmax(values: &temperatureAdjustedLogits, size: vocabSize)
             
             // Generate random value for sampling
-            let coin = Float.random(in: 0..<1, using: &rng)            
+            let coin = Float.random(in: 0..<1, using: &rng)
             
             // Sample from the distribution
             if topP <= 0 || topP >= 1 {
