@@ -45,22 +45,6 @@ enum Mode: String, CaseIterable, ExpressibleByArgument {
     }
 }
 
-// MARK: - Protocols
-
-protocol TokenizerProtocol {
-    func tokenize(_ text: String) -> [Int]
-    func detokenize(_ tokens: [Int]) -> String
-}
-
-protocol SamplerProtocol {
-    mutating func sample(logits: [Float]) -> Int
-}
-
-protocol TransformerProtocol {
-    var config: Config { get }
-    func forward(tokens: [Int]) -> [Float]
-}
-
 // MARK: - Transformer model
 
 struct Config {
@@ -143,7 +127,7 @@ struct RunState {
     }
 }
 
-class Transformer: TransformerProtocol {
+class Transformer {
     let config: Config // the hyperparameters of the architecture (the blueprint)
     let weights: TransformerWeights // the weights of the model
     var state: RunState // buffers for the "wave" of activations in the forward pass
@@ -163,7 +147,7 @@ class Transformer: TransformerProtocol {
     }
 }
 
-struct Tokenizer: TokenizerProtocol {
+struct Tokenizer {
     private let vocab: [String: Int]
     private let merges: [String: String]
     
@@ -185,7 +169,7 @@ struct Tokenizer: TokenizerProtocol {
     }
 }
 
-struct Sampler: SamplerProtocol {
+struct Sampler {
     private let temperature: Float
     private let topp: Float
     private var rng: RandomNumberGenerator
