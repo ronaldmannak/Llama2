@@ -22,12 +22,6 @@ struct AddedToken: Codable {
     let rstrip: Bool
     let normalized: Bool
     let special: Bool
-    
-    enum CodingKeys: String, CodingKey {
-        case id, content, normalized, special
-        case singleWord = "single_word"
-        case lstrip, rstrip
-    }
 }
 
 /// Normalizer configuration
@@ -56,11 +50,6 @@ struct PostProcessor: Codable {
     let single: [ProcessingStep]?
     let pair: [ProcessingStep]?
     let specialTokens: [String: SpecialTokenInfo]?
-    
-    enum CodingKeys: String, CodingKey {
-        case type, single, pair
-        case specialTokens = "special_tokens"
-    }
 }
 
 struct ProcessingStep: Codable {
@@ -76,21 +65,11 @@ struct ProcessingStep: Codable {
 struct SpecialTokenStep: Codable {
     let id: String
     let typeId: Int
-    
-    enum CodingKeys: String, CodingKey {
-        case id
-        case typeId = "type_id"
-    }
 }
 
 struct SequenceStep: Codable {
     let id: String
     let typeId: Int
-    
-    enum CodingKeys: String, CodingKey {
-        case id
-        case typeId = "type_id"
-    }
 }
 
 struct SpecialTokenInfo: Codable {
@@ -128,15 +107,6 @@ struct BPEModel: Codable {
     let byteFallback: Bool
     let vocab: [String: Int]
     let merges: [String]
-    
-    enum CodingKeys: String, CodingKey {
-        case type, dropout, vocab, merges
-        case unkToken = "unk_token"
-        case continuingSubwordPrefix = "continuing_subword_prefix"
-        case endOfWordSuffix = "end_of_word_suffix"
-        case fuseUnk = "fuse_unk"
-        case byteFallback = "byte_fallback"
-    }
 }
 
 /// Complete tokenizer configuration
@@ -150,13 +120,6 @@ struct TokenizerConfig: Codable {
     let postProcessor: PostProcessor?
     let decoder: Decoder?
     let model: BPEModel
-    
-    enum CodingKeys: String, CodingKey {
-        case version, truncation, padding, normalizer, decoder, model
-        case addedTokens = "added_tokens"
-        case preTokenizer = "pre_tokenizer"
-        case postProcessor = "post_processor"
-    }
 }
 
 /// Byte Pair Encoding (BPE) Tokenizer for converting between strings and tokens.
@@ -172,9 +135,11 @@ struct Tokenizer {
     
     /// Initialize tokenizer from a JSON file path
     init(tokenizerPath: String) throws {
-        // Read and decode the JSON file
+        // Read and decode the JSON file with automatic snake_case to camelCase conversion
         let data = try Data(contentsOf: URL(fileURLWithPath: tokenizerPath))
-        self.config = try JSONDecoder().decode(TokenizerConfig.self, from: data)
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        self.config = try decoder.decode(TokenizerConfig.self, from: data)
         
         // Initialize vocabulary
         self.vocab = config.model.vocab
