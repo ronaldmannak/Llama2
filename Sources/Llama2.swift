@@ -72,16 +72,6 @@ struct Config {
     let vocabSize: Int // vocabulary size, usually 256 (byte-level)
     let seqLen: Int // max sequence length
     
-    init(dim: Int, hiddenDim: Int, numLayers: Int, numHeads: Int, numKvHeads: Int, vocabSize: Int, seqLen: Int) {
-        self.dim = dim
-        self.hiddenDim = hiddenDim
-        self.numLayers = numLayers
-        self.numHeads = numHeads
-        self.numKvHeads = numKvHeads
-        self.vocabSize = vocabSize
-        self.seqLen = seqLen
-    }
-    
     // Convenience initializer for backward compatibility
     init(vocabSize: Int, seqLen: Int, embeddingDim: Int = 4096, numLayers: Int = 32, numHeads: Int = 32) {
         self.dim = embeddingDim
@@ -96,51 +86,23 @@ struct Config {
 
 struct TransformerWeights {
     // token embedding table
-    let tokenEmbeddingTable: [Float] // (vocab_size, dim)
+    let tokenEmbeddingTable: [Float] = [] // (vocab_size, dim)
     // weights for rmsnorms
-    let rmsAttWeight: [Float] // (layer, dim) rmsnorm weights
-    let rmsFfnWeight: [Float] // (layer, dim)
+    let rmsAttWeight: [Float] = [] // (layer, dim) rmsnorm weights
+    let rmsFfnWeight: [Float] = [] // (layer, dim)
     // weights for matmuls. note dim == n_heads * head_size
-    let wq: [Float] // (layer, dim, n_heads * head_size)
-    let wk: [Float] // (layer, dim, n_kv_heads * head_size)
-    let wv: [Float] // (layer, dim, n_kv_heads * head_size)
-    let wo: [Float] // (layer, n_heads * head_size, dim)
+    let wq: [Float] = [] // (layer, dim, n_heads * head_size)
+    let wk: [Float] = [] // (layer, dim, n_kv_heads * head_size)
+    let wv: [Float] = [] // (layer, dim, n_kv_heads * head_size)
+    let wo: [Float] = [] // (layer, n_heads * head_size, dim)
     // weights for ffn
-    let w1: [Float] // (layer, hidden_dim, dim)
-    let w2: [Float] // (layer, dim, hidden_dim)
-    let w3: [Float] // (layer, hidden_dim, dim)
+    let w1: [Float] = [] // (layer, hidden_dim, dim)
+    let w2: [Float] = [] // (layer, dim, hidden_dim)
+    let w3: [Float] = [] // (layer, hidden_dim, dim)
     // final rmsnorm
-    let rmsFinalWeight: [Float] // (dim,)
+    let rmsFinalWeight: [Float] = [] // (dim,)
     // (optional) classifier weights for the logits, on the last layer
-    let wcls: [Float]?
-    
-    init(
-        tokenEmbeddingTable: [Float] = [],
-        rmsAttWeight: [Float] = [],
-        rmsFfnWeight: [Float] = [],
-        wq: [Float] = [],
-        wk: [Float] = [],
-        wv: [Float] = [],
-        wo: [Float] = [],
-        w1: [Float] = [],
-        w2: [Float] = [],
-        w3: [Float] = [],
-        rmsFinalWeight: [Float] = [],
-        wcls: [Float]? = nil
-    ) {
-        self.tokenEmbeddingTable = tokenEmbeddingTable
-        self.rmsAttWeight = rmsAttWeight
-        self.rmsFfnWeight = rmsFfnWeight
-        self.wq = wq
-        self.wk = wk
-        self.wv = wv
-        self.wo = wo
-        self.w1 = w1
-        self.w2 = w2
-        self.w3 = w3
-        self.rmsFinalWeight = rmsFinalWeight
-        self.wcls = wcls
-    }
+    let wcls: [Float]? = nil
 }
 
 struct RunState {
