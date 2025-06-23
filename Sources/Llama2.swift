@@ -61,31 +61,138 @@ protocol TransformerProtocol {
     func forward(tokens: [Int]) -> [Float]
 }
 
-// MARK: - Data Structures
+// MARK: - Transformer model
 
 struct Config {
-    let vocabSize: Int
-    let seqLen: Int
-    let embeddingDim: Int
-    let numLayers: Int
-    let numHeads: Int
+    let dim: Int // transformer dimension
+    let hiddenDim: Int // for ffn layers
+    let numLayers: Int // number of layers
+    let numHeads: Int // number of query heads
+    let numKvHeads: Int // number of key/value heads (can be < query heads because of multiquery)
+    let vocabSize: Int // vocabulary size, usually 256 (byte-level)
+    let seqLen: Int // max sequence length
     
-    init(vocabSize: Int, seqLen: Int, embeddingDim: Int = 4096, numLayers: Int = 32, numHeads: Int = 32) {
-        self.vocabSize = vocabSize
-        self.seqLen = seqLen
-        self.embeddingDim = embeddingDim
+    init(dim: Int, hiddenDim: Int, numLayers: Int, numHeads: Int, numKvHeads: Int, vocabSize: Int, seqLen: Int) {
+        self.dim = dim
+        self.hiddenDim = hiddenDim
         self.numLayers = numLayers
         self.numHeads = numHeads
+        self.numKvHeads = numKvHeads
+        self.vocabSize = vocabSize
+        self.seqLen = seqLen
+    }
+    
+    // Convenience initializer for backward compatibility
+    init(vocabSize: Int, seqLen: Int, embeddingDim: Int = 4096, numLayers: Int = 32, numHeads: Int = 32) {
+        self.dim = embeddingDim
+        self.hiddenDim = embeddingDim * 4 // Common ratio for FFN
+        self.numLayers = numLayers
+        self.numHeads = numHeads
+        self.numKvHeads = numHeads // Default to same as query heads
+        self.vocabSize = vocabSize
+        self.seqLen = seqLen
     }
 }
 
-struct Transformer: TransformerProtocol {
-    let config: Config
-    private let weights: [Float]
+struct TransformerWeights {
+    // token embedding table
+    let tokenEmbeddingTable: [Float] // (vocab_size, dim)
+    // weights for rmsnorms
+    let rmsAttWeight: [Float] // (layer, dim) rmsnorm weights
+    let rmsFfnWeight: [Float] // (layer, dim)
+    // weights for matmuls. note dim == n_heads * head_size
+    let wq: [Float] // (layer, dim, n_heads * head_size)
+    let wk: [Float] // (layer, dim, n_kv_heads * head_size)
+    let wv: [Float] // (layer, dim, n_kv_heads * head_size)
+    let wo: [Float] // (layer, n_heads * head_size, dim)
+    // weights for ffn
+    let w1: [Float] // (layer, hidden_dim, dim)
+    let w2: [Float] // (layer, dim, hidden_dim)
+    let w3: [Float] // (layer, hidden_dim, dim)
+    // final rmsnorm
+    let rmsFinalWeight: [Float] // (dim,)
+    // (optional) classifier weights for the logits, on the last layer
+    let wcls: [Float]?
     
-    init(config: Config, weights: [Float] = []) {
+    init(
+        tokenEmbeddingTable: [Float] = [],
+        rmsAttWeight: [Float] = [],
+        rmsFfnWeight: [Float] = [],
+        wq: [Float] = [],
+        wk: [Float] = [],
+        wv: [Float] = [],
+        wo: [Float] = [],
+        w1: [Float] = [],
+        w2: [Float] = [],
+        w3: [Float] = [],
+        rmsFinalWeight: [Float] = [],
+        wcls: [Float]? = nil
+    ) {
+        self.tokenEmbeddingTable = tokenEmbeddingTable
+        self.rmsAttWeight = rmsAttWeight
+        self.rmsFfnWeight = rmsFfnWeight
+        self.wq = wq
+        self.wk = wk
+        self.wv = wv
+        self.wo = wo
+        self.w1 = w1
+        self.w2 = w2
+        self.w3 = w3
+        self.rmsFinalWeight = rmsFinalWeight
+        self.wcls = wcls
+    }
+}
+
+struct RunState {
+    // current wave of activations
+    var x: [Float] // activation at current time stamp (dim,)
+    var xb: [Float] // same, but inside a residual branch (dim,)
+    var xb2: [Float] // an additional buffer just for convenience (dim,)
+    var hb: [Float] // buffer for hidden dimension in the ffn (hidden_dim,)
+    var hb2: [Float] // buffer for hidden dimension in the ffn (hidden_dim,)
+    var q: [Float] // query (dim,)
+    var k: [Float] // key (dim,)
+    var v: [Float] // value (dim,)
+    var att: [Float] // buffer for scores/attention values (n_heads, seq_len)
+    var logits: [Float] // output logits
+    // kv cache
+    var keyCache: [Float] // (layer, seq_len, dim)
+    var valueCache: [Float] // (layer, seq_len, dim)
+    
+    init(config: Config) {
+        let dim = config.dim
+        let hiddenDim = config.hiddenDim
+        let numLayers = config.numLayers
+        let numHeads = config.numHeads
+        let seqLen = config.seqLen
+        
+        self.x = Array(repeating: 0.0, count: dim)
+        self.xb = Array(repeating: 0.0, count: dim)
+        self.xb2 = Array(repeating: 0.0, count: dim)
+        self.hb = Array(repeating: 0.0, count: hiddenDim)
+        self.hb2 = Array(repeating: 0.0, count: hiddenDim)
+        self.q = Array(repeating: 0.0, count: dim)
+        self.k = Array(repeating: 0.0, count: dim)
+        self.v = Array(repeating: 0.0, count: dim)
+        self.att = Array(repeating: 0.0, count: numHeads * seqLen)
+        self.logits = Array(repeating: 0.0, count: config.vocabSize)
+        self.keyCache = Array(repeating: 0.0, count: numLayers * seqLen * dim)
+        self.valueCache = Array(repeating: 0.0, count: numLayers * seqLen * dim)
+    }
+}
+
+class Transformer: TransformerProtocol {
+    let config: Config // the hyperparameters of the architecture (the blueprint)
+    let weights: TransformerWeights // the weights of the model
+    var state: RunState // buffers for the "wave" of activations in the forward pass
+    // Model data loaded from checkpoint file
+    private let modelData: Data
+    
+    init(config: Config, weights: TransformerWeights = TransformerWeights(), modelData: Data = Data()) {
         self.config = config
         self.weights = weights
+        self.state = RunState(config: config)
+        self.modelData = modelData
     }
     
     func forward(tokens: [Int]) -> [Float] {
@@ -343,6 +450,5 @@ struct Llama2: ParsableCommand {
 }
 
 /*
- Port this C code to this Swift project. Create stub functions for the tokenizer, sampler, and transformer and other custom objects or functions. Make sure the code is conform modern Swift 6.1
-
-*/
+ Port this C code to this Swift project. Create stub functions for the tokenizer, sampler, and transformer and other custom objects or functions. Make sure the code conforms to modern Swift 6.1 standards and follows Swift-idiomatic patterns including automatic memory management, value types where appropriate, and Swift's built-in data structures like Data for file handling. Avoid manual memory management and low-level system calls in favor of Swift's safe, automatic memory management.
+ */
