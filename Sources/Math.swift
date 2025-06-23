@@ -9,9 +9,17 @@ import Foundation
 
 // MARK: - Neural Network Math Functions
 
-/// RMS (Root Mean Square) normalization
+/// RMS (Root Mean Square) normalization - Core Implementation
+/// 
+/// This is the performance-optimized version that modifies an existing output buffer.
+/// Use this version for:
+/// - Performance-critical loops (e.g., transformer inference)
+/// - Large arrays where memory allocation overhead matters
+/// - Memory-constrained environments
+/// - When you need to reuse the same buffer repeatedly
+///
 /// - Parameters:
-///   - output: Output array to store normalized values
+///   - output: Output array to store normalized values (modified in place)
 ///   - input: Input array to normalize
 ///   - weight: Weight array for scaling
 ///   - size: Size of the arrays
@@ -26,7 +34,14 @@ func rmsnorm(output: inout [Float], input: [Float], weight: [Float], size: Int) 
     }
 }
 
-/// Softmax function for numerical stability
+/// Softmax function for numerical stability - Core Implementation
+/// 
+/// This is the performance-optimized version that modifies the input array in place.
+/// Use this version for:
+/// - Performance-critical loops
+/// - When you don't need to preserve the original input values
+/// - Large arrays where memory allocation overhead matters
+///
 /// - Parameters:
 ///   - values: Array of values to apply softmax to (modified in place)
 ///   - size: Size of the array
@@ -47,9 +62,16 @@ func softmax(values: inout [Float], size: Int) {
     }
 }
 
-/// Matrix multiplication: W (d,n) @ x (n,) -> xout (d,)
+/// Matrix multiplication: W (d,n) @ x (n,) -> xout (d,) - Core Implementation
+/// 
+/// This is the performance-optimized version that writes to an existing output buffer.
+/// Use this version for:
+/// - Performance-critical loops (most computationally intensive function)
+/// - Large matrices where memory allocation overhead matters
+/// - When you need to reuse the same output buffer repeatedly
+///
 /// - Parameters:
-///   - output: Output array (d elements)
+///   - output: Output array (d elements) - will be overwritten
 ///   - input: Input vector (n elements)
 ///   - weights: Weight matrix (d x n elements, stored row-major)
 ///   - n: Number of input dimensions
@@ -66,9 +88,20 @@ func matmul(output: inout [Float], input: [Float], weights: [Float], n: Int, d: 
     }
 }
 
-// MARK: - Convenience Overloads
+// MARK: - Convenience Wrappers
 
-/// RMS normalization with automatic output array creation
+/// RMS normalization - Convenience Wrapper
+/// 
+/// This is the Swift-idiomatic version that returns a new array.
+/// Use this version for:
+/// - One-off operations and prototyping
+/// - Higher-level APIs where code clarity matters
+/// - Small arrays where allocation overhead is negligible
+/// - When you need to preserve the original input
+///
+/// **Performance Note**: Creates a new array each call. For performance-critical loops,
+/// use the inout version instead.
+///
 /// - Parameters:
 ///   - input: Input array to normalize
 ///   - weight: Weight array for scaling
@@ -80,7 +113,17 @@ func rmsnorm(input: [Float], weight: [Float]) -> [Float] {
     return output
 }
 
-/// Softmax with automatic array creation
+/// Softmax - Convenience Wrapper
+/// 
+/// This is the Swift-idiomatic version that returns a new array.
+/// Use this version for:
+/// - One-off operations and prototyping
+/// - When you need to preserve the original input values
+/// - Small arrays where allocation overhead is negligible
+///
+/// **Performance Note**: Creates a new array each call. For performance-critical loops,
+/// use the inout version instead.
+///
 /// - Parameter values: Array of values to apply softmax to
 /// - Returns: Softmax probabilities
 func softmax(values: [Float]) -> [Float] {
@@ -89,7 +132,17 @@ func softmax(values: [Float]) -> [Float] {
     return result
 }
 
-/// Matrix multiplication with automatic output array creation
+/// Matrix multiplication - Convenience Wrapper
+/// 
+/// This is the Swift-idiomatic version that returns a new array.
+/// Use this version for:
+/// - One-off operations and prototyping
+/// - Higher-level APIs where code clarity matters
+/// - Small matrices where allocation overhead is negligible
+///
+/// **Performance Note**: Creates a new array each call. For performance-critical loops,
+/// use the inout version instead.
+///
 /// - Parameters:
 ///   - input: Input vector (n elements)
 ///   - weights: Weight matrix (d x n elements, stored row-major)
@@ -101,3 +154,56 @@ func matmul(input: [Float], weights: [Float], n: Int, d: Int) -> [Float] {
     matmul(output: &output, input: input, weights: weights, n: n, d: d)
     return output
 }
+
+/* original C code
+
+ void rmsnorm(float* o, float* x, float* weight, int size) {
+     // calculate sum of squares
+     float ss = 0.0f;
+     for (int j = 0; j < size; j++) {
+         ss += x[j] * x[j];
+     }
+     ss /= size;
+     ss += 1e-5f;
+     ss = 1.0f / sqrtf(ss);
+     // normalize and scale
+     for (int j = 0; j < size; j++) {
+         o[j] = weight[j] * (ss * x[j]);
+     }
+ }
+
+ void softmax(float* x, int size) {
+     // find max value (for numerical stability)
+     float max_val = x[0];
+     for (int i = 1; i < size; i++) {
+         if (x[i] > max_val) {
+             max_val = x[i];
+         }
+     }
+     // exp and sum
+     float sum = 0.0f;
+     for (int i = 0; i < size; i++) {
+         x[i] = expf(x[i] - max_val);
+         sum += x[i];
+     }
+     // normalize
+     for (int i = 0; i < size; i++) {
+         x[i] /= sum;
+     }
+ }
+
+ void matmul(float* xout, float* x, float* w, int n, int d) {
+     // W (d,n) @ x (n,) -> xout (d,)
+     // by far the most amount of time is spent inside this little function
+     int i;
+     #pragma omp parallel for private(i)
+     for (i = 0; i < d; i++) {
+         float val = 0.0f;
+         for (int j = 0; j < n; j++) {
+             val += w[i * n + j] * x[j];
+         }
+         xout[i] = val;
+     }
+ }
+
+*/
