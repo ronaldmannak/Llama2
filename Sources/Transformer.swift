@@ -177,11 +177,6 @@ class Transformer {
         self.state = RunState(config: config)
     }
     
-    func forward(tokens: [Int]) -> [Float] {
-        // TODO: Implement actual transformer forward pass
-        return Array(repeating: 0.0, count: config.vocabSize)
-    }
-    
     /// Reads a checkpoint file and returns the config and weights
     private static func readCheckpoint(from path: String) throws -> (config: Config, weights: TransformerWeights) {
         let fileURL = URL(fileURLWithPath: path)
@@ -220,6 +215,189 @@ class Transformer {
         let weights = try TransformerWeights.mapFromData(weightData, config: correctedConfig, sharedWeights: sharedWeights)
         
         return (correctedConfig, weights)
+    }
+    
+    /// Forward pass through the transformer
+    /// - Parameters:
+    ///   - token: Input token ID
+    ///   - pos: Position in the sequence
+    /// - Returns: Logits array for next token prediction
+    func forward(token: Int, pos: Int) -> [Float] {
+        // Convenience variables
+        let dim = config.dim
+        let kvDim = (config.dim * config.numKvHeads) / config.numHeads
+        let kvMul = config.numHeads / config.numKvHeads // integer multiplier of the kv sharing in multiquery
+        let hiddenDim = config.hiddenDim
+        let headSize = dim / config.numHeads
+        
+        // Copy the token embedding into x
+        let tokenOffset = token * dim
+        for i in 0..<dim {
+            state.x[i] = weights.tokenEmbeddingTable[tokenOffset + i]
+        }
+        
+        // Forward all the layers
+        for l in 0..<config.numLayers {
+            // Attention rmsnorm
+            let rmsAttOffset = l * dim
+            rmsnorm(output: &state.xb, input: state.x, weight: Array(weights.rmsAttWeight[rmsAttOffset..<(rmsAttOffset + dim)]), size: dim)
+            
+            // Key and value point to the kv cache
+            let loff = l * config.seqLen * kvDim // kv cache layer offset for convenience
+            let kOffset = loff + pos * kvDim
+            let vOffset = loff + pos * kvDim
+            
+            // qkv matmuls for this position
+            let wqOffset = l * dim * dim
+            let wkOffset = l * dim * kvDim
+            let wvOffset = l * dim * kvDim
+            
+            matmul(output: &state.q, input: state.xb, weights: Array(weights.wq[wqOffset..<(wqOffset + dim * dim)]), n: dim, d: dim)
+            matmul(output: &state.k, input: state.xb, weights: Array(weights.wk[wkOffset..<(wkOffset + dim * kvDim)]), n: dim, d: kvDim)
+            matmul(output: &state.v, input: state.xb, weights: Array(weights.wv[wvOffset..<(wvOffset + dim * kvDim)]), n: dim, d: kvDim)
+            
+            // RoPE relative positional encoding: complex-valued rotate q and k in each head
+            for i in stride(from: 0, to: dim, by: 2) {
+                let headDim = i % headSize
+                let freq = 1.0 / pow(10000.0, Double(headDim) / Double(headSize))
+                let val = Double(pos) * freq
+                let fcr = cos(val)
+                let fci = sin(val)
+                let rotn = i < kvDim ? 2 : 1 // how many vectors? 2 = q & k, 1 = q only
+                
+                for v in 0..<rotn {
+                    if v == 0 {
+                        // Rotate query vector
+                        let v0 = state.q[i]
+                        let v1 = state.q[i + 1]
+                        state.q[i] = Float(Double(v0) * fcr - Double(v1) * fci)
+                        state.q[i + 1] = Float(Double(v0) * fci + Double(v1) * fcr)
+                    } else {
+                        // Rotate key vector
+                        let v0 = state.k[i]
+                        let v1 = state.k[i + 1]
+                        state.k[i] = Float(Double(v0) * fcr - Double(v1) * fci)
+                        state.k[i + 1] = Float(Double(v0) * fci + Double(v1) * fcr)
+                    }
+                }
+            }
+            
+            // Store k and v in the cache
+            for i in 0..<kvDim {
+                state.keyCache[kOffset + i] = state.k[i]
+                state.valueCache[vOffset + i] = state.v[i]
+            }
+            
+            // Multihead attention. iterate over all heads
+            for h in 0..<config.numHeads {
+                // Get the query vector for this head
+                let qOffset = h * headSize
+                let q = Array(state.q[qOffset..<(qOffset + headSize)])
+                
+                // Attention scores for this head
+                let attOffset = h * config.seqLen
+                var att = Array(state.att[attOffset..<(attOffset + config.seqLen)])
+                
+                // Iterate over all timesteps, including the current one
+                for t in 0...pos {
+                    // Get the key vector for this head and at this timestep
+                    let kCacheOffset = loff + t * kvDim + (h / kvMul) * headSize
+                    let k = Array(state.keyCache[kCacheOffset..<(kCacheOffset + headSize)])
+                    
+                    // Calculate the attention score as the dot product of q and k
+                    var score: Float = 0.0
+                    for i in 0..<headSize {
+                        score += q[i] * k[i]
+                    }
+                    score /= sqrt(Float(headSize))
+                    
+                    // Save the score to the attention buffer
+                    att[t] = score
+                }
+                
+                // Softmax the scores to get attention weights, from 0..pos inclusively
+                softmax(values: &att, size: pos + 1)
+                
+                // Update the attention buffer
+                for t in 0...pos {
+                    state.att[attOffset + t] = att[t]
+                }
+                
+                // Weighted sum of the values, store back into xb
+                let xbOffset = h * headSize
+                for i in 0..<headSize {
+                    state.xb[xbOffset + i] = 0.0
+                }
+                
+                for t in 0...pos {
+                    // Get the value vector for this head and at this timestep
+                    let vCacheOffset = loff + t * kvDim + (h / kvMul) * headSize
+                    let v = Array(state.valueCache[vCacheOffset..<(vCacheOffset + headSize)])
+                    
+                    // Get the attention weight for this timestep
+                    let a = att[t]
+                    
+                    // Accumulate the weighted value into xb
+                    for i in 0..<headSize {
+                        state.xb[xbOffset + i] += a * v[i]
+                    }
+                }
+            }
+            
+            // Final matmul to get the output of the attention
+            let woOffset = l * dim * dim
+            matmul(output: &state.xb2, input: state.xb, weights: Array(weights.wo[woOffset..<(woOffset + dim * dim)]), n: dim, d: dim)
+            
+            // Residual connection back into x
+            for i in 0..<dim {
+                state.x[i] += state.xb2[i]
+            }
+            
+            // FFN rmsnorm
+            let rmsFfnOffset = l * dim
+            rmsnorm(output: &state.xb, input: state.x, weight: Array(weights.rmsFfnWeight[rmsFfnOffset..<(rmsFfnOffset + dim)]), size: dim)
+            
+            // Now for FFN in PyTorch we have: self.w2(F.silu(self.w1(x)) * self.w3(x))
+            // First calculate self.w1(x) and self.w3(x)
+            let w1Offset = l * dim * hiddenDim
+            let w3Offset = l * dim * hiddenDim
+            
+            matmul(output: &state.hb, input: state.xb, weights: Array(weights.w1[w1Offset..<(w1Offset + dim * hiddenDim)]), n: dim, d: hiddenDim)
+            matmul(output: &state.hb2, input: state.xb, weights: Array(weights.w3[w3Offset..<(w3Offset + dim * hiddenDim)]), n: dim, d: hiddenDim)
+            
+            // SwiGLU non-linearity
+            for i in 0..<hiddenDim {
+                var val = state.hb[i]
+                // silu(x)=x*σ(x), where σ(x) is the logistic sigmoid
+                val *= (1.0 / (1.0 + exp(-val)))
+                // Elementwise multiply with w3(x)
+                val *= state.hb2[i]
+                state.hb[i] = val
+            }
+            
+            // Final matmul to get the output of the ffn
+            let w2Offset = l * hiddenDim * dim
+            matmul(output: &state.xb, input: state.hb, weights: Array(weights.w2[w2Offset..<(w2Offset + hiddenDim * dim)]), n: hiddenDim, d: dim)
+            
+            // Residual connection
+            for i in 0..<dim {
+                state.x[i] += state.xb[i]
+            }
+        }
+        
+        // Final rmsnorm
+        rmsnorm(output: &state.x, input: state.x, weight: weights.rmsFinalWeight, size: dim)
+        
+        // Classifier into logits
+        if let wcls = weights.wcls {
+            // Use separate classifier weights
+            matmul(output: &state.logits, input: state.x, weights: wcls, n: dim, d: config.vocabSize)
+        } else {
+            // Use shared weights (token embedding table)
+            matmul(output: &state.logits, input: state.x, weights: weights.tokenEmbeddingTable, n: dim, d: config.vocabSize)
+        }
+        
+        return state.logits
     }
 }
 
