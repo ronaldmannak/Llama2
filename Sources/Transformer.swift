@@ -10,25 +10,25 @@ import Foundation
 // MARK: - Transformer model
 
 struct Config {
-    let dim: Int // transformer dimension
-    let hiddenDim: Int // for ffn layers
-    let numLayers: Int // number of layers
-    let numHeads: Int // number of query heads
-    let numKvHeads: Int // number of key/value heads (can be < query heads because of multiquery)
-    let vocabSize: Int // vocabulary size, usually 256 (byte-level)
-    let seqLen: Int // max sequence length
+    var dim: Int32 // transformer dimension
+    var hiddenDim: Int32 // for ffn layers
+    var numLayers: Int32 // number of layers
+    var numHeads: Int32 // number of query heads
+    var numKvHeads: Int32 // number of key/value heads (can be < query heads because of multiquery)
+    var vocabSize: Int32 // vocabulary size, usually 256 (byte-level)
+    var seqLen: Int32 // max sequence length
 }
 
 extension Config {
     // Convenience initializer for backward compatibility
     init(vocabSize: Int, seqLen: Int, embeddingDim: Int = 4096, numLayers: Int = 32, numHeads: Int = 32) {
-        self.dim = embeddingDim
-        self.hiddenDim = embeddingDim * 4 // Common ratio for FFN
-        self.numLayers = numLayers
-        self.numHeads = numHeads
-        self.numKvHeads = numHeads // Default to same as query heads
-        self.vocabSize = vocabSize
-        self.seqLen = seqLen
+        self.dim = Int32(embeddingDim)
+        self.hiddenDim = Int32(embeddingDim * 4) // Common ratio for FFN
+        self.numLayers = Int32(numLayers)
+        self.numHeads = Int32(numHeads)
+        self.numKvHeads = Int32(numHeads) // Default to same as query heads
+        self.vocabSize = Int32(vocabSize)
+        self.seqLen = Int32(seqLen)
     }
 }
 
@@ -58,7 +58,7 @@ struct TransformerWeights {
 extension TransformerWeights {
     /// Maps binary data to weight arrays, equivalent to C's memory_map_weights
     static func mapFromData(_ data: Data, config: Config, sharedWeights: Bool) throws -> TransformerWeights {
-        let headSize = config.dim / config.numHeads
+        let headSize = Int(config.dim) / Int(config.numHeads)
         
         // Convert Data to [Float] for easier manipulation
         let floatCount = data.count / MemoryLayout<Float>.size
@@ -79,28 +79,28 @@ extension TransformerWeights {
         }
         
         // Map weights in the same order as C code
-        let tokenEmbeddingTable = try extractArray(config.vocabSize * config.dim)
-        let rmsAttWeight = try extractArray(config.numLayers * config.dim)
-        let wq = try extractArray(config.numLayers * config.dim * (config.numHeads * headSize))
-        let wk = try extractArray(config.numLayers * config.dim * (config.numKvHeads * headSize))
-        let wv = try extractArray(config.numLayers * config.dim * (config.numKvHeads * headSize))
-        let wo = try extractArray(config.numLayers * (config.numHeads * headSize) * config.dim)
-        let rmsFfnWeight = try extractArray(config.numLayers * config.dim)
-        let w1 = try extractArray(config.numLayers * config.dim * config.hiddenDim)
-        let w2 = try extractArray(config.numLayers * config.hiddenDim * config.dim)
-        let w3 = try extractArray(config.numLayers * config.dim * config.hiddenDim)
-        let rmsFinalWeight = try extractArray(config.dim)
+        let tokenEmbeddingTable = try extractArray(Int(config.vocabSize) * Int(config.dim))
+        let rmsAttWeight = try extractArray(Int(config.numLayers) * Int(config.dim))
+        let wq = try extractArray(Int(config.numLayers) * Int(config.dim) * (Int(config.numHeads) * headSize))
+        let wk = try extractArray(Int(config.numLayers) * Int(config.dim) * (Int(config.numKvHeads) * headSize))
+        let wv = try extractArray(Int(config.numLayers) * Int(config.dim) * (Int(config.numKvHeads) * headSize))
+        let wo = try extractArray(Int(config.numLayers) * (Int(config.numHeads) * headSize) * Int(config.dim))
+        let rmsFfnWeight = try extractArray(Int(config.numLayers) * Int(config.dim))
+        let w1 = try extractArray(Int(config.numLayers) * Int(config.dim) * Int(config.hiddenDim))
+        let w2 = try extractArray(Int(config.numLayers) * Int(config.hiddenDim) * Int(config.dim))
+        let w3 = try extractArray(Int(config.numLayers) * Int(config.dim) * Int(config.hiddenDim))
+        let rmsFinalWeight = try extractArray(Int(config.dim))
         
         // Skip RoPE frequency tables (freq_cis_real and freq_cis_imag)
-        ptr += config.seqLen * headSize / 2 // freq_cis_real
-        ptr += config.seqLen * headSize / 2 // freq_cis_imag
+        ptr += Int(config.seqLen) * headSize / 2 // freq_cis_real
+        ptr += Int(config.seqLen) * headSize / 2 // freq_cis_imag
         
         // Handle classifier weights
         let wcls: [Float]?
         if sharedWeights {
             wcls = nil // Use token embedding table for shared weights
         } else {
-            wcls = try extractArray(config.vocabSize * config.dim)
+            wcls = try extractArray(Int(config.vocabSize) * Int(config.dim))
         }
         
         return TransformerWeights(
@@ -137,12 +137,12 @@ struct RunState {
     var valueCache: [Float] // (layer, seq_len, dim)
     
     init(config: Config) {
-        let dim = config.dim
-        let hiddenDim = config.hiddenDim
-        let numLayers = config.numLayers
-        let numHeads = config.numHeads
-        let seqLen = config.seqLen
-        let kvDim = (dim * config.numKvHeads) / numHeads // KV cache dimension
+        let dim = Int(config.dim)
+        let hiddenDim = Int(config.hiddenDim)
+        let numLayers = Int(config.numLayers)
+        let numHeads = Int(config.numHeads)
+        let seqLen = Int(config.seqLen)
+        let kvDim = (dim * Int(config.numKvHeads)) / numHeads // KV cache dimension
         
         self.x = Array(repeating: 0.0, count: dim)
         self.xb = Array(repeating: 0.0, count: dim)
@@ -153,7 +153,7 @@ struct RunState {
         self.k = Array(repeating: 0.0, count: dim)
         self.v = Array(repeating: 0.0, count: dim)
         self.att = Array(repeating: 0.0, count: numHeads * seqLen)
-        self.logits = Array(repeating: 0.0, count: config.vocabSize)
+        self.logits = Array(repeating: 0.0, count: Int(config.vocabSize))
         self.keyCache = Array(repeating: 0.0, count: numLayers * seqLen * kvDim)
         self.valueCache = Array(repeating: 0.0, count: numLayers * seqLen * kvDim)
     }
@@ -224,11 +224,11 @@ class Transformer {
     /// - Returns: Logits array for next token prediction
     func forward(token: Int, pos: Int) -> [Float] {
         // Convenience variables
-        let dim = config.dim
-        let kvDim = (config.dim * config.numKvHeads) / config.numHeads
-        let kvMul = config.numHeads / config.numKvHeads // integer multiplier of the kv sharing in multiquery
-        let hiddenDim = config.hiddenDim
-        let headSize = dim / config.numHeads
+        let dim = Int(config.dim)
+        let kvDim = (Int(config.dim) * Int(config.numKvHeads)) / Int(config.numHeads)
+        let kvMul = Int(config.numHeads) / Int(config.numKvHeads) // integer multiplier of the kv sharing in multiquery
+        let hiddenDim = Int(config.hiddenDim)
+        let headSize = dim / Int(config.numHeads)
         
         // Copy the token embedding into x
         let tokenOffset = token * dim
@@ -237,13 +237,13 @@ class Transformer {
         }
         
         // Forward all the layers
-        for l in 0..<config.numLayers {
+        for l in 0..<Int(config.numLayers) {
             // Attention rmsnorm
             let rmsAttOffset = l * dim
             rmsnorm(output: &state.xb, input: state.x, weight: Array(weights.rmsAttWeight[rmsAttOffset..<(rmsAttOffset + dim)]), size: dim)
             
             // Key and value point to the kv cache
-            let loff = l * config.seqLen * kvDim // kv cache layer offset for convenience
+            let loff = l * Int(config.seqLen) * kvDim // kv cache layer offset for convenience
             let kOffset = loff + pos * kvDim
             let vOffset = loff + pos * kvDim
             
@@ -289,14 +289,14 @@ class Transformer {
             }
             
             // Multihead attention. iterate over all heads
-            for h in 0..<config.numHeads {
+            for h in 0..<Int(config.numHeads) {
                 // Get the query vector for this head
                 let qOffset = h * headSize
                 let q = Array(state.q[qOffset..<(qOffset + headSize)])
                 
                 // Attention scores for this head
-                let attOffset = h * config.seqLen
-                var att = Array(state.att[attOffset..<(attOffset + config.seqLen)])
+                let attOffset = h * Int(config.seqLen)
+                var att = Array(state.att[attOffset..<(attOffset + Int(config.seqLen))])
                 
                 // Iterate over all timesteps, including the current one
                 for t in 0...pos {
@@ -391,10 +391,10 @@ class Transformer {
         // Classifier into logits
         if let wcls = weights.wcls {
             // Use separate classifier weights
-            matmul(output: &state.logits, input: state.x, weights: wcls, n: dim, d: config.vocabSize)
+            matmul(output: &state.logits, input: state.x, weights: wcls, n: dim, d: Int(config.vocabSize))
         } else {
             // Use shared weights (token embedding table)
-            matmul(output: &state.logits, input: state.x, weights: weights.tokenEmbeddingTable, n: dim, d: config.vocabSize)
+            matmul(output: &state.logits, input: state.x, weights: weights.tokenEmbeddingTable, n: dim, d: Int(config.vocabSize))
         }
         
         return state.logits
@@ -452,6 +452,27 @@ class Transformer {
      float* value_cache; // (layer, seq_len, dim)
  } RunState;
 
+ void read_checkpoint(char* checkpoint, Config* config, TransformerWeights* weights,
+                      int* fd, float** data, ssize_t* file_size) {
+     FILE *file = fopen(checkpoint, "rb");
+     if (!file) { fprintf(stderr, "Couldn't open file %s\n", checkpoint); exit(EXIT_FAILURE); }
+     // read in the config header
+     if (fread(config, sizeof(Config), 1, file) != 1) { exit(EXIT_FAILURE); }
+     // negative vocab size is hacky way of signaling unshared weights. bit yikes.
+     int shared_weights = config->vocab_size > 0 ? 1 : 0;
+     config->vocab_size = abs(config->vocab_size);
+     // figure out the file size
+     fseek(file, 0, SEEK_END); // move file pointer to end of file
+     *file_size = ftell(file); // get the file size, in bytes
+     fclose(file);
+     // memory map the Transformer weights into the data pointer
+     *fd = open(checkpoint, O_RDONLY); // open in read only mode
+     if (*fd == -1) { fprintf(stderr, "open failed!\n"); exit(EXIT_FAILURE); }
+     *data = mmap(NULL, *file_size, PROT_READ, MAP_PRIVATE, *fd, 0);
+     if (*data == MAP_FAILED) { fprintf(stderr, "mmap failed!\n"); exit(EXIT_FAILURE); }
+     float* weights_ptr = *data + sizeof(Config)/sizeof(float);
+     memory_map_weights(weights, config, weights_ptr, shared_weights);
+ }
 
  float* forward(Transformer* transformer, int token, int pos) {
 

@@ -149,7 +149,7 @@ struct Llama2: ParsableCommand {
                 
         // Create components with actual model data
         let tokenizer = try Tokenizer(tokenizerPath: tokenizerPath)
-//        let transformer = Transformer(checkpointPath: checkpointPath)
+        let transformer = try Transformer(checkpointPath: checkpointPath)
         let sampler = Sampler(temperature: params.temperature, topp: params.topP, seed: params.seed)
         /*
         // Create engine
