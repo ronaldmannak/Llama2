@@ -200,12 +200,17 @@ struct Tokenizer {
 struct Sampler {
     private let temperature: Float
     private let topP: Float
-    private var rng: RandomNumberGenerator
+    private var rng: any RandomNumberGenerator
     
     init(temperature: Float, topp: Float, seed: UInt64) {
         self.temperature = temperature
         self.topP = topp
-        self.rng = RandomNumberGenerator(seed: seed)
+        // Use seeded RNG if seed is provided, otherwise use system RNG
+        if seed == 0 {
+            self.rng = SystemRandomNumberGenerator()
+        } else {
+            self.rng = SeededRandomNumberGenerator(seed: seed)
+        }
     }
     
     mutating func sample(logits: [Float]) -> Int {
@@ -214,13 +219,17 @@ struct Sampler {
     }
 }
 
-// MARK: - Random Number Generator
+// MARK: - Seeded Random Number Generator
 
-struct RandomNumberGenerator: Swift.RandomNumberGenerator {
+/// A deterministic random number generator using a simple linear congruential generator
+/// This provides reproducible results when the same seed is used
+struct SeededRandomNumberGenerator: RandomNumberGenerator {
     private var state: UInt64
     
+    /// Creates a new seeded random number generator
+    /// - Parameter seed: The seed value. Use 0 for non-deterministic behavior
     init(seed: UInt64) {
-        self.state = seed
+        self.state = seed == 0 ? UInt64.random(in: 0...UInt64.max) : seed
     }
     
     mutating func next() -> UInt64 {
