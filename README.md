@@ -106,6 +106,17 @@ Many Llama2 models come with HuggingFace tokenizers that need to be converted to
 - Converts them to a JSON format compatible with the Swift tokenizer
 - Handles special tokens and byte-level encoding
 
+### Why JSON Format?
+
+Unlike the original llama2.c project which uses binary tokenizer files, this implementation uses HuggingFace's `tokenizer.json` format. This choice is intentional for educational purposes:
+
+- **Transparency**: The JSON format is human-readable, allowing you to inspect vocabulary, merge rules, and special tokens
+- **Learning Value**: You can see exactly how the tokenizer works by examining the JSON structure
+- **Debugging**: Easy to understand and debug tokenization issues
+- **Inspection**: You can learn about subword tokenization by studying the merge rules and vocabulary
+
+The binary format, while more efficient, hides these important details that are crucial for understanding how tokenization works. By using the JSON format, you can actually see and learn from the tokenizer's internal structure.
+
 ### Usage
 
 ```bash
@@ -192,15 +203,17 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## Blog Series
 
-This project is part of the **"Demystifying LLMs for Swift Developers"** series, which includes:
+This project is part of the **"Demystifying LLMs for Swift Developers"** series, which takes a unique approach designed specifically for Swift developers without data science or Python background:
 
-1. **Introduction to Large Language Models** - Understanding the basics
-2. **Tokenization Deep Dive** - How text becomes numbers
-3. **Transformer Architecture** - The neural network that powers modern LLMs
-4. **Sampling Strategies** - How models choose the next word
-5. **Building Your Own LLM** - This implementation
+Unlike most tutorials that start with the complex transformer architecture, this series treats the transformer as a "black box" initially and focuses on what happens before and after it. This makes the concepts much easier to understand and build upon.
 
-Each post builds on the previous ones, taking Swift developers from zero knowledge to a working understanding of how LLMs function.
+1. **Introduction to Large Language Models** - What are LLMs and why do they work?
+2. **Tokenization Deep Dive** - How text becomes numbers (the input to the transformer)
+3. **Sampling Strategies** - How models choose the next word (the output from the transformer)
+4. **The Transformer Black Box** - Understanding what happens inside (simplified approach)
+5. **Building Your Own LLM** - This implementation, putting it all together
+
+Each post builds on the previous ones, taking Swift developers from zero knowledge to a working understanding of how LLMs function, without getting overwhelmed by complex mathematical concepts upfront.
 
 ---
 
