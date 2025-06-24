@@ -8,8 +8,37 @@
 import Foundation
 import ArgumentParser
 
+enum Llama2Error: Error, LocalizedError {
+    case invalidMode(String)
+    case invalidParameter(String)
+    case invalidTemperature(Float)
+    case invalidTopP(Float)
+    case invalidSteps(Int)
+    case fileNotFound(String)
+    case unsupportedTokenizer(String)
+    
+    var errorDescription: String? {
+        switch self {
+        case .invalidMode(let mode):
+            return "Invalid mode: '\(mode)'. Valid modes are: generate, chat"
+        case .invalidParameter(let param):
+            return "Invalid parameter: \(param)"
+        case .invalidTemperature(let temp):
+            return "Temperature must be >= 0.0, got: \(temp)"
+        case .invalidTopP(let topp):
+            return "Top-p must be between 0.0 and 1.0, got: \(topp)"
+        case .invalidSteps(let steps):
+            return "Steps must be >= 0, got: \(steps)"
+        case .fileNotFound(let path):
+            return "File not found: \(path)"
+        case .unsupportedTokenizer(let string):
+            return "Unsupported tokenizer: Expected BPE, got: \(string)"
+        }
+    }
+}
+
 // MARK: - Binary Tokenizer Structure
-/*
+
 struct BinaryTokenizer {
     let vocabSize: Int
     let maxTokenLength: Int32
@@ -19,12 +48,9 @@ struct BinaryTokenizer {
     
     init(binPath: String) throws {
         // Get the path to the binary tokenizer file
-        guard let filePath = Bundle.module.path(forResource: binPath, ofType: nil) else {
-            throw Llama2Error.fileNotFound("Binary tokenizer file not found: \(binPath)")
-        }
         
         // Read the binary file
-        let data = try Data(contentsOf: URL(fileURLWithPath: filePath))
+        let data = try Data(contentsOf: URL(fileURLWithPath: binPath))
         
         print("Binary file size: \(data.count) bytes")
         
@@ -123,16 +149,20 @@ struct BinaryTokenizer {
         }
     }
 }
-*/
+
 // MARK: - Main Function for Testing
 
 func testBinaryTokenizer() {
-//    do {
-//        let tokenizer = try BinaryTokenizer(binPath: "tok512.bin")
-//        tokenizer.printDebugInfo()
-//    } catch {
-//        print("Error reading binary tokenizer: \(error)")
-//    }
+    do {
+        guard let filePath = Bundle.module.path(forResource: "tok512", ofType: "bin") else {
+            throw Llama2Error.fileNotFound("Binary tokenizer file not found: tok512.bin")
+        }
+        
+        let tokenizer = try BinaryTokenizer(binPath: filePath)
+        tokenizer.printDebugInfo()
+    } catch {
+        print("Error reading binary tokenizer: \(error)")
+    }
 }
 
 // MARK: - Main Entry Point
