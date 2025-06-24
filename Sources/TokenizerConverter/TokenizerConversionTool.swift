@@ -62,9 +62,9 @@ struct BinaryTokenizer {
             throw Llama2Error.invalidParameter("File too small to contain max_token_length")
         }
         
-        let maxTokenLength = data.withUnsafeBytes { bytes in
-            bytes.load(fromByteOffset: offset, as: Int32.self)
-        }
+        // Use explicit byte copying to ensure proper alignment
+        var maxTokenLength: Int32 = 0
+        data.copyBytes(to: withUnsafeMutableBytes(of: &maxTokenLength) { $0 }, from: offset..<(offset + 4))
         offset += 4
         
         print("Max token length: \(maxTokenLength)")
@@ -83,9 +83,9 @@ struct BinaryTokenizer {
                 throw Llama2Error.invalidParameter("File too small to contain vocab score \(i)")
             }
             
-            let score = data.withUnsafeBytes { bytes in
-                bytes.load(fromByteOffset: offset, as: Float.self)
-            }
+            // Use explicit byte copying to ensure proper alignment
+            var score: Float = 0.0
+            data.copyBytes(to: withUnsafeMutableBytes(of: &score) { $0 }, from: offset..<(offset + 4))
             vocabScores.append(score)
             offset += 4
             
@@ -94,9 +94,8 @@ struct BinaryTokenizer {
                 throw Llama2Error.invalidParameter("File too small to contain string length \(i)")
             }
             
-            let len = data.withUnsafeBytes { bytes in
-                bytes.load(fromByteOffset: offset, as: Int32.self)
-            }
+            var len: Int32 = 0
+            data.copyBytes(to: withUnsafeMutableBytes(of: &len) { $0 }, from: offset..<(offset + 4))
             offset += 4
             
             // Read the string
