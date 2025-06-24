@@ -152,13 +152,9 @@ struct BinaryTokenizer {
 
 // MARK: - Main Function for Testing
 
-func testBinaryTokenizer() {
+func testBinaryTokenizer(binPath: String) {
     do {
-        guard let filePath = Bundle.module.path(forResource: "tok512", ofType: "bin") else {
-            throw Llama2Error.fileNotFound("Binary tokenizer file not found: tok512.bin")
-        }
-        
-        let tokenizer = try BinaryTokenizer(binPath: filePath)
+        let tokenizer = try BinaryTokenizer(binPath: binPath)
         tokenizer.printDebugInfo()
     } catch {
         print("Error reading binary tokenizer: \(error)")
@@ -171,12 +167,32 @@ func testBinaryTokenizer() {
 struct TokenizerConverter: ParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "Convert binary tokenizer to JSON format",
-        discussion: "Reads tok512.bin and converts it to JSON format compatible with our tokenizer"
+        discussion: "Reads a binary tokenizer file and converts it to JSON format compatible with our tokenizer"
     )
     
+    @Option(
+        name: .shortAndLong,
+        help: "Path to the binary tokenizer file (defaults to bundled tok512.bin)"
+    )
+    var binPath: String?
+    
     func run() throws {
+        let filePath: String
+        
+        if let providedPath = binPath {
+            // Use the provided path
+            filePath = providedPath
+        } else {
+            // Use the default bundled file
+            guard let defaultPath = Bundle.module.path(forResource: "tok512", ofType: "bin") else {
+                throw Llama2Error.fileNotFound("Binary tokenizer file not found: tok512.bin")
+            }
+            filePath = defaultPath
+        }
+        
         print("Testing binary tokenizer reading...")
-        testBinaryTokenizer()
+        print("Using file: \(filePath)")
+        testBinaryTokenizer(binPath: filePath)
     }
 }
 
