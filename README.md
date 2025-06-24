@@ -1,6 +1,6 @@
 # Llama2.swift
 
-![Llama2.swift](assets/A%20cute%20catroon%20Llama%20in%20front%20of%20the%20wor.png)
+![Llama2.swift](assets/llama.png)
 
 **A Swift implementation of Llama2 text generation, designed for Swift developers without data science or Python background.**
 
