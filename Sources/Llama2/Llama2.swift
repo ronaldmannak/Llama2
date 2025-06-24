@@ -249,7 +249,7 @@ struct Llama2: ParsableCommand {
     var prompt: String?
     
     @Option(name: .customShort("z"), help: "Optional path to custom tokenizer")
-    var tokenizerPath: String = Bundle.module.path(forResource: "Resources/tokenizer", ofType: "json") ?? "uh-oh"
+    var tokenizerPath: String = Bundle.module.path(forResource: "Resources/tokenizer", ofType: "json") ?? ""
     
     @Option(name: .customShort("m"), help: "Mode: generate|chat, default: generate")
     var mode: Mode = .generate
