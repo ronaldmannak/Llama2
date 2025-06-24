@@ -17,6 +17,24 @@
             "name": "Release Llama2",
             "program": "${workspaceFolder:Llama2}/.build/release/Llama2",
             "preLaunchTask": "swift: Build Release Llama2"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:Llama2}",
+            "name": "Debug TokenizerConverter",
+            "program": "${workspaceFolder:Llama2}/.build/debug/TokenizerConverter",
+            "preLaunchTask": "swift: Build Debug TokenizerConverter"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:Llama2}",
+            "name": "Release TokenizerConverter",
+            "program": "${workspaceFolder:Llama2}/.build/release/TokenizerConverter",
+            "preLaunchTask": "swift: Build Release TokenizerConverter"
         }
     ]
 }

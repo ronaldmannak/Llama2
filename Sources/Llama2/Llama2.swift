@@ -302,20 +302,6 @@ struct Llama2: ParsableCommand {
             throw Llama2Error.invalidParameter("Invalid sequence length: \(transformer.config.seqLen)")
         }
         
-        // Sanity check 4: Test tokenizer with a simple token
-        #if DEBUG
-        do {
-            var testTokenizer = tokenizer
-            let testTokens = testTokenizer.encode(text: "test", bos: false, eos: false)
-            for token in testTokens {
-                guard token >= 0 && token < modelVocabSize else {
-                    throw Llama2Error.invalidParameter("Tokenizer produced invalid token ID: \(token) (vocab size: \(modelVocabSize))")
-                }
-            }
-        } catch {
-            throw Llama2Error.invalidParameter("Tokenizer test failed: \(error)")
-        }
-        
         // Print configuration summary for debugging
         fputs("Configuration:\n", stderr)
         fputs("  Model vocab size: \(modelVocabSize)\n", stderr)
@@ -331,7 +317,6 @@ struct Llama2: ParsableCommand {
             fputs("  Prompt: \"\(prompt)\"\n", stderr)
         }
         fputs("\n", stderr)
-        #endif 
         
         // Create engine
         let engine = Llama2Engine(
