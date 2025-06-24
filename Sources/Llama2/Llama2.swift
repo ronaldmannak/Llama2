@@ -31,7 +31,7 @@ final class Llama2Engine {
     }
     
     func generate(prompt: String?, steps: Int) throws -> String {
-        let emptyPrompt = ""
+        let emptyPrompt = "once upon a time"
         let actualPrompt = prompt ?? emptyPrompt
         
         // Encode the prompt into tokens
@@ -338,11 +338,6 @@ struct Llama2: ParsableCommand {
         }
         
         print(output)         
-        
-        print(tokenizer.config.model.type)
-        print(tokenizer.config.model.unkToken)
-        print(tokenizer.vocab.count)
-//        print(tokenizer.vocab)
     }
 }
 
